@@ -16,6 +16,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.GZIPInputStream
 
 /**
@@ -30,8 +31,9 @@ class ContentBlocker(private val context: Context, private val scope: CoroutineS
 
     @Volatile private var rules = Rules(emptySet(), emptySet())
     private val firstLoad = CountDownLatch(1)
+    private val loadStarted = AtomicBoolean(false)
     private val mutex = Mutex()
-    private val cacheDir = File(context.filesDir, "filters").apply { mkdirs() }
+    private val cacheDir by lazy { File(context.filesDir, "filters").apply { mkdirs() } }
 
     private val _ruleCount = MutableStateFlow(0)
     val ruleCount: StateFlow<Int> = _ruleCount
@@ -74,7 +76,14 @@ class ContentBlocker(private val context: Context, private val scope: CoroutineS
         if (firstLoad.count > 0L) firstLoad.await(FIRST_LOAD_TIMEOUT_S, TimeUnit.SECONDS)
     }
 
+    fun ensureLoaded(lists: List<FilterList>) {
+        if (loadStarted.compareAndSet(false, true)) {
+            scope.launch(Dispatchers.IO) { loadFromCache(lists) }
+        }
+    }
+
     fun reload(lists: List<FilterList>) {
+        loadStarted.set(true)
         scope.launch(Dispatchers.IO) { loadFromCache(lists) }
     }
 

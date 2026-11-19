@@ -8,7 +8,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import android.app.Activity
 import android.net.Uri
 import android.view.WindowManager
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,20 +38,13 @@ import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -78,6 +73,15 @@ import app.eddy.browser.ui.components.EmptyState
 import app.eddy.browser.ui.components.ScreenScaffold
 import app.eddy.browser.ui.components.SearchField
 import app.eddy.browser.ui.components.SiteIcon
+import app.eddy.browser.ui.sakuga.SakugaAlertDialog
+import app.eddy.browser.ui.sakuga.SakugaAnimationController
+import app.eddy.browser.ui.sakuga.SakugaButton
+import app.eddy.browser.ui.sakuga.SakugaModalBottomSheet
+import app.eddy.browser.ui.sakuga.SakugaOutlinedButton
+import app.eddy.browser.ui.sakuga.SakugaOutlinedTextField
+import app.eddy.browser.ui.sakuga.SakugaParticlePreset
+import app.eddy.browser.ui.sakuga.SakugaTextButton
+import app.eddy.browser.ui.sakuga.sakugaPressEffect
 import app.eddy.browser.ui.theme.Dimens
 import app.eddy.browser.util.UrlUtils
 import app.eddy.browser.util.readTextCapped
@@ -180,7 +184,7 @@ fun PasswordsScreen(vm: BrowserViewModel) {
                     Icon(Icons.Rounded.Lock, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
                     Text(str(R.string.passwords_are_locked), Modifier.padding(top = 12.dp), style = MaterialTheme.typography.titleMedium)
                     Text(str(R.string.confirm_your_screen_lock_to_continue), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button(onClick = ::requestUnlock, Modifier.padding(top = 16.dp)) { Text(str(R.string.unlock)) }
+                    SakugaButton(onClick = ::requestUnlock, Modifier.padding(top = 16.dp)) { Text(str(R.string.unlock)) }
                 }
             } else {
                 SearchField(query, { query = it }, str(R.string.search_passwords))
@@ -222,8 +226,16 @@ fun PasswordsScreen(vm: BrowserViewModel) {
 @Composable
 private fun LoginRow(login: LoginEntity, onClick: () -> Unit) {
     val host = UrlUtils.displayHost(login.origin)
+    val source = remember { MutableInteractionSource() }
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 64.dp).clickable(role = Role.Button, onClickLabel = str(R.string.open_details), onClick = onClick).padding(horizontal = Dimens.gutter, vertical = 8.dp),
+        Modifier.fillMaxWidth().heightIn(min = 64.dp)
+            .sakugaPressEffect(
+                interactionSource = source,
+                role = SakugaAnimationController.ComponentRole.CARD,
+                enableParticles = false,
+            )
+            .clickable(interactionSource = source, indication = LocalIndication.current, role = Role.Button, onClickLabel = str(R.string.open_details), onClick = onClick)
+            .padding(horizontal = Dimens.gutter, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         SiteIcon(host, size = Dimens.faviconLarge)
@@ -242,7 +254,7 @@ private fun LoginSheet(vm: BrowserViewModel, login: LoginEntity, onEdit: () -> U
     var confirmDelete by remember { mutableStateOf(false) }
     val host = UrlUtils.displayHost(login.origin)
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    SakugaModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(horizontal = Dimens.gutterLarge).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SiteIcon(host, size = Dimens.faviconLarge)
@@ -273,11 +285,11 @@ private fun LoginSheet(vm: BrowserViewModel, login: LoginEntity, onEdit: () -> U
             }
             HorizontalDivider()
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(onClick = { onDismiss(); vm.navigate(login.origin) }) {
+                SakugaOutlinedButton(onClick = { onDismiss(); vm.navigate(login.origin) }) {
                     Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, Modifier.size(18.dp)); Text(str(R.string.open_site), Modifier.padding(start = 6.dp))
                 }
-                OutlinedButton(onClick = onEdit) { Icon(Icons.Rounded.Edit, null, Modifier.size(18.dp)); Text(str(R.string.edit), Modifier.padding(start = 6.dp)) }
-                TextButton(onClick = { confirmDelete = true }) { Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp)); Text(str(R.string.delete_4), Modifier.padding(start = 6.dp)) }
+                SakugaOutlinedButton(onClick = onEdit) { Icon(Icons.Rounded.Edit, null, Modifier.size(18.dp)); Text(str(R.string.edit), Modifier.padding(start = 6.dp)) }
+                SakugaTextButton(onClick = { confirmDelete = true }, burstOnClick = true, particlePreset = SakugaParticlePreset.DELETE) { Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp)); Text(str(R.string.delete_4), Modifier.padding(start = 6.dp)) }
             }
         }
     }
@@ -313,14 +325,14 @@ private fun LoginEditor(vm: BrowserViewModel, existing: LoginEntity?, onDismiss:
     LaunchedEffect(decrypted) { if (existing != null && password.isEmpty()) decrypted?.let { password = it } }
 
     val origin = PasswordManager.normalizeOrigin(site)
-    AlertDialog(
+    SakugaAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (existing == null) str(R.string.add_password) else str(R.string.edit_password)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(site, { site = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.website)) }, singleLine = true, isError = site.isNotBlank() && origin == null, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
-                OutlinedTextField(username, { username = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.username)) }, singleLine = true)
-                OutlinedTextField(
+                SakugaOutlinedTextField(site, { site = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.website)) }, singleLine = true, isError = site.isNotBlank() && origin == null, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
+                SakugaOutlinedTextField(username, { username = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.username)) }, singleLine = true)
+                SakugaOutlinedTextField(
                     password, { password = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.password)) }, singleLine = true,
                     visualTransformation = if (show) VisualTransformation.None else PasswordVisualTransformation(),
                     trailingIcon = {
@@ -333,7 +345,7 @@ private fun LoginEditor(vm: BrowserViewModel, existing: LoginEntity?, onDismiss:
             }
         },
         confirmButton = {
-            TextButton(enabled = origin != null && password.isNotEmpty(), onClick = {
+            SakugaTextButton(enabled = origin != null && password.isNotEmpty(), burstOnClick = true, onClick = {
                 scope.launch {
                     if (existing == null) vm.passwords.save(origin!!, username.trim(), password)
                     else vm.passwords.replace(existing.id, origin!!, username.trim(), password)
@@ -341,6 +353,6 @@ private fun LoginEditor(vm: BrowserViewModel, existing: LoginEntity?, onDismiss:
                 }
             }) { Text(str(R.string.save)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
+        dismissButton = { SakugaTextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
     )
 }

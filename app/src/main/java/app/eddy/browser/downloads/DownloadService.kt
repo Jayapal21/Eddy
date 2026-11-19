@@ -39,7 +39,7 @@ class DownloadService : Service() {
                 } else {
                     val known = live.values.filter { it.total > 0 }
                     val percent = if (known.isEmpty()) null else (known.sumOf { it.downloaded } * 100 / known.sumOf { it.total }).toInt()
-                    getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, build(active, percent))
+                    getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, build(active, percent))
                 }
             }
         }
@@ -80,7 +80,7 @@ class DownloadService : Service() {
         private const val NOTIFICATION_ID = 7001
 
         fun createChannels(context: Context) {
-            val nm = context.getSystemService(NotificationManager::class.java)
+            val nm = context.getSystemService(NotificationManager::class.java) ?: return
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL_ACTIVE, context.getString(R.string.channel_downloads_active), NotificationManager.IMPORTANCE_LOW),
             )

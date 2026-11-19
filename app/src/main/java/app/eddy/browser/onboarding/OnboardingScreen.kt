@@ -24,11 +24,14 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -64,16 +67,10 @@ import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.Widgets
-import androidx.compose.material3.Button
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -105,10 +102,21 @@ import app.eddy.browser.R
 import app.eddy.browser.browser.BrowserViewModel
 import app.eddy.browser.data.models.Settings
 import app.eddy.browser.data.models.ThemeMode
-import app.eddy.browser.data.models.ToolbarPosition
 import app.eddy.browser.ui.animation.effectSpring
 import app.eddy.browser.ui.animation.rememberHaptics
 import app.eddy.browser.ui.animation.spatialSpring
+import app.eddy.browser.ui.sakuga.SakugaButton
+import app.eddy.browser.ui.sakuga.SakugaCard
+import app.eddy.browser.ui.sakuga.SakugaEffectType
+import app.eddy.browser.ui.sakuga.SakugaFilledTonalButton
+import app.eddy.browser.ui.sakuga.SakugaFilledTonalIconButton
+import app.eddy.browser.ui.sakuga.SakugaPhysics
+import app.eddy.browser.ui.sakuga.SakugaSegmentedRow
+import app.eddy.browser.ui.sakuga.SakugaTabItem
+import app.eddy.browser.ui.sakuga.rememberSakugaColors
+import app.eddy.browser.ui.sakuga.rememberSakugaController
+import app.eddy.browser.ui.sakuga.sakugaOverlay
+import app.eddy.browser.ui.sakuga.sakugaPressSquash
 import app.eddy.browser.ui.shapes.MorphShape
 import app.eddy.browser.ui.theme.Dimens
 import app.eddy.browser.ui.theme.LocalReducedMotion
@@ -162,7 +170,7 @@ fun OnboardingScreen(vm: BrowserViewModel, settings: Settings, modifier: Modifie
             Row(Modifier.fillMaxWidth().height(Dimens.touchTarget + 8.dp).padding(horizontal = Dimens.gutter), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                 // Every slide except the last can be skipped; the last one has its own "Start browsing" button.
                 AnimatedVisibility(pager.currentPage < PAGE_COUNT - 1, enter = fadeIn(), exit = fadeOut()) {
-                    FilledTonalButton(onClick = ::finish, Modifier.heightIn(min = Dimens.touchTarget)) { Text(str(R.string.skip)) }
+                    SakugaFilledTonalButton(onClick = ::finish, Modifier.heightIn(min = Dimens.touchTarget)) { Text(str(R.string.skip)) }
                 }
             }
 
@@ -174,7 +182,7 @@ fun OnboardingScreen(vm: BrowserViewModel, settings: Settings, modifier: Modifie
                 )
                 val pulse = if (LocalReducedMotion.current) 1f else breathe
                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().heightIn(min = 140.dp), contentAlignment = Alignment.Center) {
-                    val heroSize = minOf(maxHeight - 16.dp, maxWidth * 0.72f, 320.dp)
+                    val heroSize = minOf(maxHeight - 16.dp, maxWidth * 0.72f, 320.dp).coerceAtLeast(1.dp)
                     Box(
                         Modifier.size(heroSize)
                             .graphicsLayer { rotationZ = position * 36f; scaleX = pulse; scaleY = pulse }
@@ -218,7 +226,6 @@ fun OnboardingScreen(vm: BrowserViewModel, settings: Settings, modifier: Modifie
                         2 -> {
                             PageText(str(R.string.built_for_one_hand), str(R.string.address_bar_tabs_and_menu_sit_within_thu))
                             BarDemo(Modifier.padding(top = 20.dp))
-                            ToolbarChoice(settings.toolbarPosition) { v -> vm.launchSettings { it.copy(toolbarPosition = v) } }
                         }
                         3 -> {
                             PageText(str(R.string.make_it_yours), str(R.string.pick_a_look_and_a_search_engine_you_can))
@@ -240,14 +247,14 @@ fun OnboardingScreen(vm: BrowserViewModel, settings: Settings, modifier: Modifie
                     enter = fadeIn(effectSpring()) + scaleIn(spatialSpring(), initialScale = 0.6f) + expandHorizontally(spatialSpring()),
                     exit = fadeOut(effectSpring()) + scaleOut(spatialSpring(), targetScale = 0.6f) + shrinkHorizontally(spatialSpring()),
                 ) {
-                    FilledTonalIconButton(
+                    SakugaFilledTonalIconButton(
                         onClick = { haptics.tick(); scope.launch { pager.animateScrollToPage(pager.currentPage - 1) } },
                         Modifier.padding(end = 16.dp).size(56.dp),
                     ) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, str(R.string.back)) }
                 }
                 Indicators(pager.currentPage, Modifier.weight(1f))
                 val last = pager.currentPage == PAGE_COUNT - 1
-                Button(
+                SakugaButton(
                     onClick = { if (last) finish() else { haptics.tick(); scope.launch { pager.animateScrollToPage(pager.currentPage + 1) } } },
                     Modifier.heightIn(min = 56.dp).animateContentSize(spatialSpring()),
                     shape = CircleShape,
@@ -343,30 +350,38 @@ private fun BarDemo(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ToolbarChoice(selected: ToolbarPosition, onSelect: (ToolbarPosition) -> Unit) {
-    SingleChoiceSegmentedButtonRow(Modifier.padding(top = 20.dp)) {
-        listOf(ToolbarPosition.BOTTOM to str(R.string.bottom), ToolbarPosition.TOP to str(R.string.top)).forEachIndexed { i, (pos, label) ->
-            SegmentedButton(selected == pos, { onSelect(pos) }, SegmentedButtonDefaults.itemShape(i, 2)) { Text(label) }
-        }
-    }
-}
-
-@Composable
 private fun LookPicker(vm: BrowserViewModel, s: Settings) {
+    val reduced = LocalReducedMotion.current
+    val sakugaColors = rememberSakugaColors()
+    val modes = listOf(ThemeMode.SYSTEM to str(R.string.auto), ThemeMode.LIGHT to str(R.string.light), ThemeMode.DARK to str(R.string.dark))
     Column(Modifier.padding(top = 18.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        SingleChoiceSegmentedButtonRow {
-            listOf(ThemeMode.SYSTEM to str(R.string.auto), ThemeMode.LIGHT to str(R.string.light), ThemeMode.DARK to str(R.string.dark)).forEachIndexed { i, (mode, label) ->
-                SegmentedButton(s.themeMode == mode, { vm.launchSettings { it.copy(themeMode = mode) } }, SegmentedButtonDefaults.itemShape(i, 3)) { Text(label) }
-            }
-        }
+        SakugaSegmentedRow(
+            items = modes.map { SakugaTabItem(it.second) },
+            selectedIndex = modes.indexOfFirst { it.first == s.themeMode }.coerceAtLeast(0),
+            onSelect = { idx ->
+                val mode = modes[idx].first
+                vm.launchSettings { it.copy(themeMode = mode) }
+            },
+            modifier = Modifier.widthIn(max = 320.dp),
+        )
         // Palettes only apply without dynamic colour, so picking one turns dynamic colour off.
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Palette.entries.forEachIndexed { i, p ->
                 val selected = !s.dynamicColor && s.palette == i
+                val controller = rememberSakugaController()
+                val source = remember { MutableInteractionSource() }
+                val scale by animateFloatAsState(if (selected && !reduced) 1.08f else 1f, SakugaPhysics.overshootSpring(reduced), label = "onboardSwatch")
                 Box(
-                    Modifier.size(Dimens.touchTarget - 6.dp).clip(CircleShape).background(p.swatch)
+                    Modifier.size(Dimens.touchTarget - 6.dp)
+                        .graphicsLayer { scaleX = scale; scaleY = scale }
+                        .sakugaPressSquash(source, SakugaPhysics.PRESS_ICON_SCALE_X, SakugaPhysics.PRESS_ICON_SCALE_Y)
+                        .sakugaOverlay(controller)
+                        .clip(CircleShape).background(p.swatch)
                         .border(if (selected) 3.dp else 0.dp, MaterialTheme.colorScheme.onSurface, CircleShape)
-                        .clickable(role = Role.RadioButton) { vm.launchSettings { it.copy(palette = i, dynamicColor = false) } }
+                        .clickable(interactionSource = source, indication = LocalIndication.current, role = Role.RadioButton) {
+                            controller.emitCenter(SakugaEffectType.CRYSTAL_BURST, sakugaColors, intensity = 0.85f)
+                            vm.launchSettings { it.copy(palette = i, dynamicColor = false) }
+                        }
                         .semantics { contentDescription = str(R.string.colors_description, p.label) + if (selected) str(R.string.selected_suffix) else "" },
                     contentAlignment = Alignment.Center,
                 ) { if (selected) Icon(Icons.Rounded.Check, null, tint = Color.White) }
@@ -375,8 +390,9 @@ private fun LookPicker(vm: BrowserViewModel, s: Settings) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             s.allEngines.filter { it.builtIn && it.id != "searxng" }.take(5).forEach { engine ->
                 val on = s.searchEngineId == engine.id
-                Surface(
+                SakugaCard(
                     onClick = { vm.launchSettings { it.copy(searchEngineId = engine.id) } },
+                    burstOnClick = true,
                     shape = CircleShape,
                     color = if (on) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
                     contentColor = if (on) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
@@ -395,24 +411,24 @@ private fun LookPicker(vm: BrowserViewModel, s: Settings) {
 private fun DefaultBrowserButton() {
     val context = LocalContext.current
     val roleManager = remember { context.getSystemService(RoleManager::class.java) }
-    fun held() = Build.VERSION.SDK_INT >= 29 && roleManager.isRoleHeld(RoleManager.ROLE_BROWSER)
+    fun held() = Build.VERSION.SDK_INT >= 29 && roleManager?.isRoleHeld(RoleManager.ROLE_BROWSER) == true
     var isDefault by remember { mutableStateOf(held()) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { isDefault = held() }
     val request = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { isDefault = held() }
 
     when {
         isDefault -> SetupCard(Icons.Rounded.CheckCircle, str(R.string.eddy_is_your_default_browser), str(R.string.links_from_other_apps_open_here), Modifier.padding(top = 24.dp), done = true)
-        roleManager.isRoleAvailable(RoleManager.ROLE_BROWSER) -> SetupCard(
+        roleManager?.isRoleAvailable(RoleManager.ROLE_BROWSER) == true -> SetupCard(
             Icons.Rounded.Public, str(R.string.make_eddy_the_default), str(R.string.open_links_from_other_apps_here), Modifier.padding(top = 24.dp),
-        ) { request.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_BROWSER)) }
+        ) { runCatching { request.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_BROWSER)) } }
     }
 }
 
 /** A full-width tappable row for an optional setup step; [done] swaps the chevron for a settled, non-tappable state. */
 @Composable
 private fun SetupCard(icon: ImageVector, title: String, subtitle: String, modifier: Modifier = Modifier, done: Boolean = false, onClick: () -> Unit = {}) {
-    Surface(
-        onClick = onClick, enabled = !done,
+    SakugaCard(
+        onClick = onClick, enabled = !done, burstOnClick = !done,
         modifier = modifier.fillMaxWidth().widthIn(max = 360.dp),
         shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
@@ -433,9 +449,9 @@ private fun SetupCard(icon: ImageVector, title: String, subtitle: String, modifi
 @Composable
 private fun WidgetButton() {
     val context = LocalContext.current
-    val manager = remember { AppWidgetManager.getInstance(context) }
-    if (!remember { manager.isRequestPinAppWidgetSupported }) return
+    val manager = remember { AppWidgetManager.getInstance(context) } ?: return
+    if (!remember(manager) { runCatching { manager.isRequestPinAppWidgetSupported }.getOrDefault(false) }) return
     SetupCard(Icons.Rounded.Widgets, str(R.string.add_search_widget), str(R.string.search_from_your_home_screen), Modifier.padding(top = 10.dp)) {
-        manager.requestPinAppWidget(ComponentName(context, SearchWidget::class.java), null, null)
+        runCatching { manager.requestPinAppWidget(ComponentName(context, SearchWidget::class.java), null, null) }
     }
 }

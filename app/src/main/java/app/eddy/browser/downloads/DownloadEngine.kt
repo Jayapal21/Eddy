@@ -62,8 +62,9 @@ class DownloadEngine(
     private val settings: () -> Settings,
     /** Cookie header for a normal-profile URL, so a download resumed after a restart still signs in. */
     private val profileCookie: (String) -> String = { "" },
+    private val _events: MutableSharedFlow<DownloadEvent> = MutableSharedFlow(extraBufferCapacity = 8),
 ) {
-    private val partDir = File(context.filesDir, "downloads").apply { mkdirs() }
+    private val partDir by lazy { File(context.filesDir, "downloads").apply { mkdirs() } }
     private val jobs = ConcurrentHashMap<Long, Job>()
     private val intents = ConcurrentHashMap<Long, DownloadStatus>()
     /** id -> (host the cookie was read for, Cookie header). Never sent to a different host. */
@@ -77,7 +78,6 @@ class DownloadEngine(
     /** Number of downloads currently running or waiting for a slot. */
     val active: StateFlow<Int> = _active
 
-    private val _events = MutableSharedFlow<DownloadEvent>(extraBufferCapacity = 8)
     val events: SharedFlow<DownloadEvent> = _events
 
     init {

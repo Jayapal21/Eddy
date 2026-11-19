@@ -9,8 +9,10 @@ import android.content.ClipboardManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,14 +36,11 @@ import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.VisibilityOff
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -67,6 +66,11 @@ import app.eddy.browser.ui.components.SearchField
 import app.eddy.browser.ui.components.SiteIcon
 import app.eddy.browser.ui.components.TextInputDialog
 import app.eddy.browser.ui.components.EddyIconButton
+import app.eddy.browser.ui.sakuga.SakugaAlertDialog
+import app.eddy.browser.ui.sakuga.SakugaOutlinedTextField
+import app.eddy.browser.ui.sakuga.SakugaPhysics
+import app.eddy.browser.ui.sakuga.SakugaTextButton
+import app.eddy.browser.ui.sakuga.sakugaPressSquash
 import app.eddy.browser.ui.theme.Dimens
 import app.eddy.browser.util.UrlUtils
 import app.eddy.browser.util.readTextCapped
@@ -163,10 +167,12 @@ private fun BookmarkRow(vm: BrowserViewModel, b: Bookmark, onEdit: () -> Unit) {
     val context = LocalContext.current
     val haptics = rememberHaptics()
     var menu by remember { mutableStateOf(false) }
+    val source = remember { MutableInteractionSource() }
     Box {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 64.dp)
-                .combinedClickable(role = Role.Button, onClickLabel = str(R.string.open), onLongClickLabel = str(R.string.more_actions), onClick = { vm.navigate(b.url) }, onLongClick = { haptics.longPress(); menu = true })
+                .sakugaPressSquash(source, SakugaPhysics.PRESS_CARD_SCALE_X, SakugaPhysics.PRESS_CARD_SCALE_Y)
+                .combinedClickable(interactionSource = source, indication = LocalIndication.current, role = Role.Button, onClickLabel = str(R.string.open), onLongClickLabel = str(R.string.more_actions), onClick = { vm.navigate(b.url) }, onLongClick = { haptics.longPress(); menu = true })
                 .padding(start = Dimens.gutter, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -194,9 +200,13 @@ private fun BookmarkRow(vm: BrowserViewModel, b: Bookmark, onEdit: () -> Unit) {
 @Composable
 private fun FolderRow(f: BookmarkFolder, count: Int, onOpen: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
+    val source = remember { MutableInteractionSource() }
     Box {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 64.dp).combinedClickableNoRipple(onOpen).padding(start = Dimens.gutter, top = 8.dp, bottom = 8.dp),
+            Modifier.fillMaxWidth().heightIn(min = 64.dp)
+                .sakugaPressSquash(source, SakugaPhysics.PRESS_CARD_SCALE_X, SakugaPhysics.PRESS_CARD_SCALE_Y)
+                .clickable(interactionSource = source, indication = LocalIndication.current, role = Role.Button, onClick = onOpen)
+                .padding(start = Dimens.gutter, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.size(Dimens.faviconLarge).background(MaterialTheme.colorScheme.secondaryContainer, CircleShape), contentAlignment = Alignment.Center) {
@@ -215,9 +225,6 @@ private fun FolderRow(f: BookmarkFolder, count: Int, onOpen: () -> Unit, onRenam
     }
 }
 
-private fun Modifier.combinedClickableNoRipple(onClick: () -> Unit): Modifier =
-    this.clickable(role = Role.Button, onClick = onClick)
-
 @Composable
 private fun BookmarkEditor(b: Bookmark, folders: List<BookmarkFolder>, onDismiss: () -> Unit, onSave: (Bookmark) -> Unit) {
     var title by remember { mutableStateOf(b.title) }
@@ -225,15 +232,15 @@ private fun BookmarkEditor(b: Bookmark, folders: List<BookmarkFolder>, onDismiss
     var folderId by remember { mutableStateOf(b.folderId) }
     var pick by remember { mutableStateOf(false) }
     val valid = title.isNotBlank() && UrlUtils.isUrl(url)
-    AlertDialog(
+    SakugaAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(str(R.string.edit_bookmark)) },
         text = {
             Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.title)) }, singleLine = true)
-                OutlinedTextField(url, { url = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.address)) }, singleLine = true, isError = !UrlUtils.isUrl(url))
+                SakugaOutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.title)) }, singleLine = true)
+                SakugaOutlinedTextField(url, { url = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.address)) }, singleLine = true, isError = !UrlUtils.isUrl(url))
                 Box {
-                    TextButton(onClick = { pick = true }) { Text(str(R.string.folder_label, folders.firstOrNull { it.id == folderId }?.name ?: str(R.string.none))) }
+                    SakugaTextButton(onClick = { pick = true }) { Text(str(R.string.folder_label, folders.firstOrNull { it.id == folderId }?.name ?: str(R.string.none))) }
                     DropdownMenu(pick, { pick = false }) {
                         DropdownMenuItem(text = { Text(str(R.string.none)) }, onClick = { folderId = Bookmark.ROOT_FOLDER; pick = false })
                         folders.forEach { f -> DropdownMenuItem(text = { Text(f.name) }, onClick = { folderId = f.id; pick = false }) }
@@ -242,8 +249,8 @@ private fun BookmarkEditor(b: Bookmark, folders: List<BookmarkFolder>, onDismiss
             }
         },
         confirmButton = {
-            TextButton(enabled = valid, onClick = { onSave(b.copy(title = title.trim(), url = UrlUtils.resolve(url.trim(), app.eddy.browser.data.models.SearchEngine("", "", "%s")), folderId = folderId)) }) { Text(str(R.string.save)) }
+            SakugaTextButton(enabled = valid, burstOnClick = true, onClick = { onSave(b.copy(title = title.trim(), url = UrlUtils.resolve(url.trim(), app.eddy.browser.data.models.SearchEngine("", "", "%s")), folderId = folderId)) }) { Text(str(R.string.save)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
+        dismissButton = { SakugaTextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
     )
 }

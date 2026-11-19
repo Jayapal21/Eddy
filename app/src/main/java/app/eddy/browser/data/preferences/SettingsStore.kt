@@ -1,10 +1,12 @@
 package app.eddy.browser.data.preferences
 
 import android.content.Context
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.mutablePreferencesOf
@@ -19,7 +21,10 @@ import kotlinx.coroutines.flow.map
 import org.json.JSONArray
 import org.json.JSONObject
 
-private val Context.dataStore by preferencesDataStore("eddy_settings")
+private val Context.dataStore by preferencesDataStore(
+    name = "eddy_settings",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 /** Typed view over DataStore. All writes go through [update] so callers never touch raw keys. */
 class SettingsStore(private val context: Context) {
@@ -30,9 +35,24 @@ class SettingsStore(private val context: Context) {
      * The welcome tour is for people who just installed Eddy. Someone who updates from a version that predates
      * the tour already knows the app, so they are marked as done instead of being shown it once.
      */
-    suspend fun migrateOnboardingFlag(updatedInstall: Boolean) {
-        if (!updatedInstall) return
-        context.dataStore.edit { prefs -> if (prefs[K.onboardingDone] == null) prefs[K.onboardingDone] = true }
+    suspend fun migrateOnboardingFlag(isUpdatedInstall: () -> Boolean) {
+        val current = context.dataStore.data.first()
+        val migrated = resolveOnboardingMigration(current[K.onboardingDone], isUpdatedInstall) ?: return
+        context.dataStore.edit { prefs -> if (prefs[K.onboardingDone] == null) prefs[K.onboardingDone] = migrated }
+    }
+
+    /**
+     * Reads initial settings in a single DataStore pass, only checking [isUpdatedInstall] when
+     * `onboarding_done` is unset so returning cold launches skip PackageManager Binder IPC.
+     */
+    suspend fun loadInitialSettings(isUpdatedInstall: () -> Boolean): Settings {
+        val current = context.dataStore.data.first()
+        val migrated = resolveOnboardingMigration(current[K.onboardingDone], isUpdatedInstall)
+        if (migrated != null) {
+            context.dataStore.edit { prefs -> if (prefs[K.onboardingDone] == null) prefs[K.onboardingDone] = migrated }
+            return context.dataStore.data.first().toSettings()
+        }
+        return current.toSettings()
     }
 
     suspend fun update(block: (Settings) -> Settings) {
@@ -73,6 +93,7 @@ class SettingsStore(private val context: Context) {
 
     private object K {
         val theme = stringPreferencesKey("theme")
+        val readerTheme = stringPreferencesKey("reader_theme")
         val amoled = booleanPreferencesKey("amoled")
         val dynamic = booleanPreferencesKey("dynamic")
         val palette = intPreferencesKey("palette")
@@ -134,6 +155,7 @@ class SettingsStore(private val context: Context) {
         val d = Settings()
         return Settings(
             themeMode = this[K.theme].toEnum(d.themeMode),
+            readerTheme = this[K.readerTheme].toEnum(d.readerTheme),
             amoled = this[K.amoled] ?: d.amoled,
             dynamicColor = this[K.dynamic] ?: d.dynamicColor,
             palette = this[K.palette] ?: d.palette,
@@ -188,6 +210,7 @@ class SettingsStore(private val context: Context) {
 
     private fun MutablePreferences.write(s: Settings) {
         this[K.theme] = s.themeMode.name
+        this[K.readerTheme] = s.readerTheme.name
         this[K.amoled] = s.amoled
         this[K.dynamic] = s.dynamicColor
         this[K.palette] = s.palette
@@ -245,6 +268,9 @@ class SettingsStore(private val context: Context) {
         private const val FORMAT = 1
         /** Describes this install rather than the user's choices, so it is neither exported nor imported. */
         private val InstallState = setOf("onboarding_done", "discord_announced", "changelog_seen", "filter_updated", "filter_defaults_seen")
+
+        internal fun resolveOnboardingMigration(existingOnboardingDone: Boolean?, isUpdatedInstall: () -> Boolean): Boolean? =
+            if (existingOnboardingDone == null && isUpdatedInstall()) true else null
 
         val DefaultShortcuts = emptyList<Shortcut>()
 

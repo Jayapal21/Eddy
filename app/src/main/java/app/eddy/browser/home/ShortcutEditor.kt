@@ -2,9 +2,12 @@ package app.eddy.browser.home
 
 import app.eddy.browser.R
 import app.eddy.browser.util.str
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,16 +23,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +37,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
@@ -45,8 +46,19 @@ import androidx.compose.ui.unit.dp
 import app.eddy.browser.data.models.Shortcut
 import app.eddy.browser.ui.components.ShortcutColors
 import app.eddy.browser.ui.components.ShortcutIcons
+import app.eddy.browser.ui.sakuga.SakugaButton
+import app.eddy.browser.ui.sakuga.SakugaEffectType
+import app.eddy.browser.ui.sakuga.SakugaModalBottomSheet
+import app.eddy.browser.ui.sakuga.SakugaOutlinedTextField
+import app.eddy.browser.ui.sakuga.SakugaPhysics
+import app.eddy.browser.ui.sakuga.SakugaTextButton
+import app.eddy.browser.ui.sakuga.rememberSakugaColors
+import app.eddy.browser.ui.sakuga.rememberSakugaController
+import app.eddy.browser.ui.sakuga.sakugaOverlay
+import app.eddy.browser.ui.sakuga.sakugaPressSquash
 import app.eddy.browser.ui.shapes.EddyPolygons
 import app.eddy.browser.ui.theme.Dimens
+import app.eddy.browser.ui.theme.LocalReducedMotion
 import app.eddy.browser.util.UrlUtils
 import androidx.compose.material3.toShape
 
@@ -61,15 +73,17 @@ fun ShortcutEditor(initial: Shortcut, isNew: Boolean, onDismiss: () -> Unit, onS
     val normalizedUrl = url.trim().let { if (UrlUtils.isUrl(it)) it else "" }
     val valid = title.isNotBlank() && normalizedUrl.isNotEmpty()
     val scheme = MaterialTheme.colorScheme
+    val reduced = LocalReducedMotion.current
+    val sakugaColors = rememberSakugaColors()
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    SakugaModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(
             Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(horizontal = Dimens.gutterLarge, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(if (isNew) str(R.string.new_shortcut) else str(R.string.edit_shortcut), style = MaterialTheme.typography.titleLarge)
-            OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.name)) }, singleLine = true)
-            OutlinedTextField(
+            SakugaOutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.name)) }, singleLine = true)
+            SakugaOutlinedTextField(
                 url, { url = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.address)) }, singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 isError = url.isNotBlank() && normalizedUrl.isEmpty(),
@@ -88,14 +102,26 @@ fun ShortcutEditor(initial: Shortcut, isNew: Boolean, onDismiss: () -> Unit, onS
             Text(str(R.string.colour), style = MaterialTheme.typography.titleSmall)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 repeat(ShortcutColors.COUNT) { i ->
+                    val selected = color.mod(ShortcutColors.COUNT) == i
+                    val controller = rememberSakugaController()
+                    val source = remember { MutableInteractionSource() }
+                    val scale by animateFloatAsState(if (selected && !reduced) 1.08f else 1f, SakugaPhysics.overshootSpring(reduced), label = "swatchScale")
                     Box(
-                        Modifier.size(Dimens.touchTarget - 4.dp).clip(CircleShape).background(ShortcutColors.container(i, scheme))
-                            .border(if (color.mod(ShortcutColors.COUNT) == i) 3.dp else 1.dp, if (color.mod(ShortcutColors.COUNT) == i) scheme.primary else scheme.outlineVariant, CircleShape)
-                            .clickable { color = i }
+                        Modifier.size(Dimens.touchTarget - 4.dp)
+                            .graphicsLayer { scaleX = scale; scaleY = scale }
+                            .sakugaPressSquash(source, SakugaPhysics.PRESS_ICON_SCALE_X, SakugaPhysics.PRESS_ICON_SCALE_Y)
+                            .sakugaOverlay(controller)
+                            .clip(CircleShape)
+                            .background(ShortcutColors.container(i, scheme))
+                            .border(if (selected) 3.dp else 1.dp, if (selected) scheme.primary else scheme.outlineVariant, CircleShape)
+                            .clickable(interactionSource = source, indication = LocalIndication.current, role = Role.RadioButton) {
+                                color = i
+                                controller.emitCenter(SakugaEffectType.CRYSTAL_BURST, sakugaColors, intensity = 0.85f)
+                            }
                             .semantics { contentDescription = str(R.string.colour_2, i + 1) },
                         contentAlignment = Alignment.Center,
                     ) {
-                        if (color.mod(ShortcutColors.COUNT) == i) Icon(Icons.Rounded.Check, null, tint = ShortcutColors.content(i, scheme))
+                        if (selected) Icon(Icons.Rounded.Check, null, tint = ShortcutColors.content(i, scheme))
                     }
                 }
             }
@@ -103,10 +129,21 @@ fun ShortcutEditor(initial: Shortcut, isNew: Boolean, onDismiss: () -> Unit, onS
             Text(str(R.string.shape), style = MaterialTheme.typography.titleSmall)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 EddyPolygons.all.forEachIndexed { i, polygon ->
+                    val selected = shape.mod(EddyPolygons.all.size) == i
+                    val controller = rememberSakugaController()
+                    val source = remember { MutableInteractionSource() }
+                    val scale by animateFloatAsState(if (selected && !reduced) 1.08f else 1f, SakugaPhysics.overshootSpring(reduced), label = "shapeScale")
                     Box(
-                        Modifier.size(Dimens.touchTarget).clip(polygon.toShape())
-                            .background(if (shape.mod(EddyPolygons.all.size) == i) scheme.primary else scheme.surfaceContainerHighest)
-                            .clickable { shape = i }
+                        Modifier.size(Dimens.touchTarget)
+                            .graphicsLayer { scaleX = scale; scaleY = scale }
+                            .sakugaPressSquash(source, SakugaPhysics.PRESS_ICON_SCALE_X, SakugaPhysics.PRESS_ICON_SCALE_Y)
+                            .sakugaOverlay(controller)
+                            .clip(polygon.toShape())
+                            .background(if (selected) scheme.primary else scheme.surfaceContainerHighest)
+                            .clickable(interactionSource = source, indication = LocalIndication.current, role = Role.RadioButton) {
+                                shape = i
+                                controller.emitCenter(SakugaEffectType.CRYSTAL_BURST, sakugaColors, intensity = 0.85f)
+                            }
                             .semantics { contentDescription = str(R.string.shape_2, i + 1) },
                     )
                 }
@@ -117,8 +154,8 @@ fun ShortcutEditor(initial: Shortcut, isNew: Boolean, onDismiss: () -> Unit, onS
             )
 
             Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) }
-                Button(
+                SakugaTextButton(onClick = onDismiss) { Text(str(R.string.cancel)) }
+                SakugaButton(
                     onClick = { onSave(initial.copy(title = title.trim(), url = UrlUtils.resolve(normalizedUrl, app.eddy.browser.data.models.SearchEngine("", "", "%s")), icon = icon, color = color, shape = shape)) },
                     enabled = valid,
                 ) { Text(str(R.string.save)) }
@@ -130,11 +167,23 @@ fun ShortcutEditor(initial: Shortcut, isNew: Boolean, onDismiss: () -> Unit, onS
 @Composable
 private fun Choice(selected: Boolean, description: String, onClick: () -> Unit, content: @Composable () -> Unit) {
     val scheme = MaterialTheme.colorScheme
+    val reduced = LocalReducedMotion.current
+    val sakugaColors = rememberSakugaColors()
+    val controller = rememberSakugaController()
+    val source = remember { MutableInteractionSource() }
+    val scale by animateFloatAsState(if (selected && !reduced) 1.06f else 1f, SakugaPhysics.overshootSpring(reduced), label = "choiceScale")
     Box(
-        Modifier.size(Dimens.touchTarget).clip(CircleShape)
+        Modifier.size(Dimens.touchTarget)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .sakugaPressSquash(source, SakugaPhysics.PRESS_ICON_SCALE_X, SakugaPhysics.PRESS_ICON_SCALE_Y)
+            .sakugaOverlay(controller)
+            .clip(CircleShape)
             .background(if (selected) scheme.primaryContainer else scheme.surfaceContainerHighest)
             .border(if (selected) 2.dp else 0.dp, scheme.primary, CircleShape)
-            .clickable(onClick = onClick)
+            .clickable(interactionSource = source, indication = LocalIndication.current, role = Role.RadioButton) {
+                controller.emitCenter(SakugaEffectType.CRYSTAL_BURST, sakugaColors, intensity = 0.8f)
+                onClick()
+            }
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) { content() }

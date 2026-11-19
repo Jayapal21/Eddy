@@ -45,14 +45,14 @@ class MediaService : Service() {
             return START_NOT_STICKY
         }
         startForeground(NOTIFICATION_ID, build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
-        audio.registerAudioPlaybackCallback(callback, handler)
+        audio?.registerAudioPlaybackCallback(callback, handler)
         scheduleStopIfIdle()
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(stopRunnable)
-        audio.unregisterAudioPlaybackCallback(callback)
+        audio?.unregisterAudioPlaybackCallback(callback)
         super.onDestroy()
     }
 
@@ -82,18 +82,26 @@ class MediaService : Service() {
         @Volatile var pauseAll: (() -> Unit)? = null
 
         fun createChannel(context: Context) {
-            context.getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(CHANNEL, context.getString(R.string.channel_media), NotificationManager.IMPORTANCE_LOW),
-            )
+            runCatching {
+                context.getSystemService(NotificationManager::class.java)?.createNotificationChannel(
+                    NotificationChannel(CHANNEL, context.getString(R.string.channel_media), NotificationManager.IMPORTANCE_LOW),
+                )
+            }
         }
 
         // A paused WebView player stays in the playback list, so also require audio to be actually playing.
         // ponytail: isMusicActive is device-wide, so another app's music keeps the notification up.
-        fun isPlaying(context: Context) = context.getSystemService(AudioManager::class.java)
-            .let { it.activePlaybackConfigurations.isNotEmpty() && it.isMusicActive }
+        fun isPlaying(context: Context): Boolean = runCatching {
+            val am = context.getSystemService(AudioManager::class.java) ?: return@runCatching false
+            am.activePlaybackConfigurations.isNotEmpty() && am.isMusicActive
+        }.getOrDefault(false)
 
-        fun start(context: Context) = ContextCompat.startForegroundService(context, Intent(context, MediaService::class.java))
+        fun start(context: Context) {
+            runCatching { ContextCompat.startForegroundService(context, Intent(context, MediaService::class.java)) }
+        }
 
-        fun stop(context: Context) = context.stopService(Intent(context, MediaService::class.java))
+        fun stop(context: Context) {
+            runCatching { context.stopService(Intent(context, MediaService::class.java)) }
+        }
     }
 }

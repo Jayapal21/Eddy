@@ -2,7 +2,9 @@ package app.eddy.browser.browser
 
 import app.eddy.browser.R
 import app.eddy.browser.util.str
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,9 +33,12 @@ import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.DesktopWindows
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.DownloadForOffline
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.LibraryBooks
+import androidx.compose.material.icons.rounded.OfflinePin
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.Search
@@ -42,16 +47,14 @@ import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +68,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import app.eddy.browser.ui.sakuga.SakugaAnimationController
+import app.eddy.browser.ui.sakuga.SakugaCard
+import app.eddy.browser.ui.sakuga.SakugaModalBottomSheet
+import app.eddy.browser.ui.sakuga.SakugaParticlePreset
+import app.eddy.browser.ui.sakuga.SakugaSwitch
+import app.eddy.browser.ui.sakuga.sakugaPressEffect
 import app.eddy.browser.ui.theme.Dimens
 import app.eddy.browser.util.UrlUtils
 
@@ -77,11 +86,13 @@ import app.eddy.browser.util.UrlUtils
 @Composable
 fun MenuSheet(vm: BrowserViewModel, tab: BrowserTab?, bookmarked: Boolean, onDismiss: () -> Unit) {
     val webPage = tab != null && UrlUtils.isWebUrl(tab.url)
+    val articleSaved by vm.isArticleSaved.collectAsStateWithLifecycle()
+    val savedArticles by vm.savedArticlesList.collectAsStateWithLifecycle()
     fun act(block: () -> Unit): () -> Unit = { onDismiss(); block() }
     // Big system fonts cannot fit four buttons in a row without breaking words.
     val perRow = if (LocalDensity.current.fontScale > 1.3f) 2 else 4
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    SakugaModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(horizontal = Dimens.gutter).padding(bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -109,6 +120,20 @@ fun MenuSheet(vm: BrowserViewModel, tab: BrowserTab?, bookmarked: Boolean, onDis
                 )
                 quick.chunked(perRow).forEach { row ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { row.forEach { QuickButton(it, Modifier.weight(1f)) } }
+                }
+                if (tab?.readerActive == true) {
+                    Group {
+                        Row(
+                            icon = if (articleSaved) Icons.Rounded.OfflinePin else Icons.Rounded.DownloadForOffline,
+                            label = when {
+                                vm.savingOffline -> str(R.string.saving_offline)
+                                articleSaved -> str(R.string.saved_offline_remove)
+                                else -> str(R.string.offline_save)
+                            },
+                            onClick = act { vm.toggleOfflineSave() },
+                            enabled = !vm.savingOffline,
+                        )
+                    }
                 }
             }
 
@@ -151,6 +176,14 @@ fun MenuSheet(vm: BrowserViewModel, tab: BrowserTab?, bookmarked: Boolean, onDis
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { row.forEach { QuickButton(it, Modifier.weight(1f)) } }
             }
 
+            Group {
+                Row(
+                    icon = Icons.Rounded.LibraryBooks,
+                    label = if (savedArticles.isNotEmpty()) str(R.string.saved_articles_count, savedArticles.size) else str(R.string.saved_articles),
+                    onClick = act { vm.screen = Screen.SAVED_ARTICLES },
+                )
+            }
+
             Group { Row(Icons.Rounded.Settings, str(R.string.settings), act { vm.screen = Screen.SETTINGS }) }
         }
     }
@@ -161,9 +194,10 @@ private class Quick(val icon: ImageVector, val label: String, val enabled: Boole
 /** Icon over label, used for the page actions and the library shortcuts. */
 @Composable
 private fun QuickButton(q: Quick, modifier: Modifier) {
-    Surface(
+    SakugaCard(
         onClick = q.onClick,
         enabled = q.enabled,
+        burstOnClick = true,
         modifier = modifier.heightIn(min = 72.dp),
         shape = RoundedCornerShape(24.dp),
         color = if (q.highlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -192,8 +226,17 @@ private object GroupScope
 
 @Composable
 private fun GroupScope.Row(icon: ImageVector, label: String, onClick: () -> Unit, enabled: Boolean = true) {
+    val source = remember { MutableInteractionSource() }
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 54.dp).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+        Modifier.fillMaxWidth().heightIn(min = 54.dp)
+            .sakugaPressEffect(
+                interactionSource = source,
+                enabled = enabled,
+                role = SakugaAnimationController.ComponentRole.CARD,
+                particlePreset = SakugaParticlePreset.SUBTLE,
+                enableParticles = false,
+            )
+            .clickable(interactionSource = source, indication = LocalIndication.current, enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 18.dp).alpha(if (enabled) 1f else 0.38f),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -204,13 +247,21 @@ private fun GroupScope.Row(icon: ImageVector, label: String, onClick: () -> Unit
 
 @Composable
 private fun GroupScope.SwitchRow(icon: ImageVector, label: String, checked: Boolean, enabled: Boolean, onToggle: () -> Unit) {
+    val source = remember { MutableInteractionSource() }
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 54.dp).toggleable(checked, enabled = enabled, role = Role.Switch) { onToggle() }
+        Modifier.fillMaxWidth().heightIn(min = 54.dp)
+            .sakugaPressEffect(
+                interactionSource = source,
+                enabled = enabled,
+                role = SakugaAnimationController.ComponentRole.TOGGLE,
+                enableParticles = false,
+            )
+            .toggleable(checked, interactionSource = source, indication = LocalIndication.current, enabled = enabled, role = Role.Switch) { onToggle() }
             .padding(start = 18.dp, end = 14.dp).alpha(if (enabled) 1f else 0.38f),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
         Text(label, Modifier.padding(start = 16.dp).weight(1f), style = MaterialTheme.typography.bodyLarge)
-        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
+        SakugaSwitch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }

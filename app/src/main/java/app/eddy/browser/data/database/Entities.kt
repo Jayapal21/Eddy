@@ -96,3 +96,61 @@ data class LoginEntity(
 /** Origins where the user chose "Never save". */
 @Entity(tableName = "login_blocklist")
 data class LoginBlock(@PrimaryKey val origin: String)
+
+/** Extracted Reader Mode article saved locally for offline reading. */
+@Entity(
+    tableName = "saved_articles",
+    indices = [Index(value = ["url"], unique = true), Index("savedAt")],
+)
+data class SavedArticle(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val url: String,
+    val title: String,
+    val siteName: String = "",
+    val byline: String = "",
+    val readMinutes: Int = 1,
+    val textContent: String,
+    val contentHtml: String,
+    val imageCount: Int = 0,
+    val savedAt: Long = System.currentTimeMillis(),
+)
+
+/** Cached binary image belonging to a [SavedArticle] for offline rendering without network access. */
+@Entity(
+    tableName = "saved_article_images",
+    foreignKeys = [
+        androidx.room.ForeignKey(
+            entity = SavedArticle::class,
+            parentColumns = ["id"],
+            childColumns = ["articleId"],
+            onDelete = androidx.room.ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("articleId")],
+)
+data class SavedArticleImage(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val articleId: Long,
+    val originalUrl: String,
+    val mimeType: String,
+    val imageData: ByteArray,
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is SavedArticleImage) return false
+        return id == other.id &&
+            articleId == other.articleId &&
+            originalUrl == other.originalUrl &&
+            mimeType == other.mimeType &&
+            imageData.contentEquals(other.imageData)
+    }
+
+    override fun hashCode(): Int {
+        var result = id.hashCode()
+        result = 31 * result + articleId.hashCode()
+        result = 31 * result + originalUrl.hashCode()
+        result = 31 * result + mimeType.hashCode()
+        result = 31 * result + imageData.contentHashCode()
+        return result
+    }
+}

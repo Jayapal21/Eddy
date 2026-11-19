@@ -36,7 +36,7 @@ class FilterUpdateService : JobService() {
         private const val JOB_ID = 4201
 
         fun schedule(context: Context) {
-            val scheduler = context.getSystemService(JobScheduler::class.java)
+            val scheduler = context.getSystemService(JobScheduler::class.java) ?: return
             if (scheduler.getPendingJob(JOB_ID) != null) return
             scheduler.schedule(
                 JobInfo.Builder(JOB_ID, ComponentName(context, FilterUpdateService::class.java))

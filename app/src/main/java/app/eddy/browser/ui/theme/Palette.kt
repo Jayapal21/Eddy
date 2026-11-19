@@ -117,3 +117,54 @@ fun ColorScheme.toAmoled(): ColorScheme = copy(
     surfaceContainerHighest = Color(0xFF202020),
     surfaceBright = Color(0xFF262626),
 )
+
+/** Charcoal frost-glass surface and ink tokens for the floating WebView header. */
+data class FrostHeaderColors(
+    val backdrop: Color,
+    val coinSurface: Color,
+    val coinSurfacePressed: Color,
+    val capsuleSurface: Color,
+    val capsuleSurfacePressed: Color,
+    val border: Color,
+    val topHighlight: Color,
+    val primaryText: Color,
+    val secondaryText: Color,
+    val accent: Color,
+    val activePillContainer: Color,
+)
+
+@androidx.compose.runtime.Composable
+fun rememberFrostHeaderColors(isDark: Boolean): FrostHeaderColors {
+    val scheme = androidx.compose.material3.MaterialTheme.colorScheme
+    return androidx.compose.runtime.remember(isDark, scheme) {
+        if (isDark) {
+            FrostHeaderColors(
+                backdrop = Color(0xFF080B0D),
+                coinSurface = Color(0xFF171D24).copy(alpha = 0.90f),
+                coinSurfacePressed = Color(0xFF222B35).copy(alpha = 0.96f),
+                capsuleSurface = Color(0xFF1B222B).copy(alpha = 0.92f),
+                capsuleSurfacePressed = Color(0xFF242D39).copy(alpha = 0.96f),
+                border = Color(0xFF29323D),
+                topHighlight = Color.White.copy(alpha = 0.06f),
+                primaryText = Color(0xFFF5F7FA),
+                secondaryText = Color(0xFFA7B0BC),
+                accent = Color(0xFF36D6AE),
+                activePillContainer = Color(0xFF36D6AE).copy(alpha = 0.18f),
+            )
+        } else {
+            FrostHeaderColors(
+                backdrop = scheme.background,
+                coinSurface = scheme.surfaceContainerHigh.copy(alpha = 0.92f),
+                coinSurfacePressed = scheme.surfaceContainerHighest,
+                capsuleSurface = scheme.surfaceContainerLowest.copy(alpha = 0.96f),
+                capsuleSurfacePressed = scheme.surfaceContainerHigh,
+                border = scheme.outlineVariant.copy(alpha = 0.55f),
+                topHighlight = Color.White.copy(alpha = 0.65f),
+                primaryText = scheme.onSurface,
+                secondaryText = scheme.onSurfaceVariant,
+                accent = scheme.primary,
+                activePillContainer = scheme.primaryContainer,
+            )
+        }
+    }
+}

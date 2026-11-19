@@ -43,6 +43,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import app.eddy.browser.data.models.ExternalLinks
 import app.eddy.browser.data.models.HomepageMode
+import app.eddy.browser.data.models.ReaderThemeMode
 import app.eddy.browser.data.models.SearchEngine
 import app.eddy.browser.data.models.Settings
 import app.eddy.browser.data.models.Shortcut
@@ -63,6 +64,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -72,9 +74,12 @@ import kotlinx.coroutines.withContext
 import app.eddy.browser.MainActivity
 import app.eddy.browser.R
 import app.eddy.browser.widget.SearchWidget
+import android.webkit.CookieManager
+import androidx.compose.runtime.mutableFloatStateOf
+import app.eddy.browser.data.database.SavedArticle
 import java.util.UUID
 
-enum class Screen { BROWSER, TABS, BOOKMARKS, HISTORY, DOWNLOADS, PASSWORDS, SETTINGS, PDF, SOURCE }
+enum class Screen { BROWSER, TABS, BOOKMARKS, HISTORY, DOWNLOADS, PASSWORDS, SETTINGS, PDF, SOURCE, SAVED_ARTICLES }
 
 /** A downloaded PDF opened in the built-in reader. */
 class OpenPdf(val uri: String, val name: String)
@@ -113,26 +118,36 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
 
     val settingsState: StateFlow<Settings> = container.settings
     override val settings: Settings get() = settingsState.value
-    override val blocker = container.blocker
-    override val sites = container.sites
-    override val favicons = container.favicons
+    override val blocker by lazy(LazyThreadSafetyMode.NONE) { container.blocker }
+    private var sitesInitialized = false
+    override val sites by lazy(LazyThreadSafetyMode.NONE) { sitesInitialized = true; container.sites }
+    override val favicons by lazy(LazyThreadSafetyMode.NONE) { container.favicons }
     override var pageBackground: Int = 0xFF000000.toInt()
         private set
 
-    val history = container.history
-    val passwords = container.passwords
-    val downloadItems = container.database.downloads().all()
-    val bookmarks = container.bookmarks
-    val downloads = container.downloads
-    val thumbnails = container.thumbnails
+    val history by lazy(LazyThreadSafetyMode.NONE) { container.history }
+    val passwords by lazy(LazyThreadSafetyMode.NONE) { container.passwords }
+    val downloadItems by lazy(LazyThreadSafetyMode.NONE) { container.database.downloads().all() }
+    val bookmarks by lazy(LazyThreadSafetyMode.NONE) { container.bookmarks }
+    val savedArticles by lazy(LazyThreadSafetyMode.NONE) { container.savedArticles }
+    val downloads by lazy(LazyThreadSafetyMode.NONE) { container.downloads }
+    val thumbnails by lazy(LazyThreadSafetyMode.NONE) { container.thumbnails }
     val store = container.settingsStore
-    val blockerRules = container.blocker.ruleCount
-    val blockerUpdating = container.blocker.updating
+    val blockerRules by lazy(LazyThreadSafetyMode.NONE) { container.blocker.ruleCount }
+    val blockerUpdating by lazy(LazyThreadSafetyMode.NONE) { container.blocker.updating }
 
-    private val factory = WebViewFactory(app, this)
-    val tabs = TabManager(app, viewModelScope, thumbnails, { factory }, { settings }, onPrivateSessionEnd = { sites.clearPrivate() }, onClosed = { blobDownloader.cancelTab(it.id) })
-    val incognitoIsolated: Boolean get() = factory.incognitoIsolated
-    val pageBridgeSupported: Boolean get() = factory.pageBridgeSupported
+    private val factory by lazy(LazyThreadSafetyMode.NONE) { WebViewFactory(app, this) }
+    val tabs = TabManager(
+        app,
+        viewModelScope,
+        { thumbnails },
+        { factory },
+        { settings },
+        onPrivateSessionEnd = { if (sitesInitialized) sites.clearPrivate() },
+        onClosed = { if (blobDownloaderInitialized) blobDownloader.cancelTab(it.id) },
+    )
+    val incognitoIsolated: Boolean get() = WebViewFactory.isIncognitoIsolated
+    val pageBridgeSupported: Boolean get() = WebViewFactory.isPageBridgeSupported
 
     // ---- UI state -------------------------------------------------------------------------
     var screen by mutableStateOf(Screen.BROWSER)
@@ -181,68 +196,67 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
     private val snackbarChannel = Channel<SnackbarMessage>(Channel.BUFFERED)
     val snackbars = snackbarChannel.receiveAsFlow()
 
-    val isBookmarked: StateFlow<Boolean> = snapshotFlow { tabs.selected?.url.orEmpty() }
-        .distinctUntilChanged()
-        .flatMapLatest { if (UrlUtils.isWebUrl(it)) bookmarks.isBookmarked(it) else MutableStateFlow(false) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val isBookmarked: StateFlow<Boolean> by lazy(LazyThreadSafetyMode.NONE) {
+        snapshotFlow { tabs.selected?.url.orEmpty() }
+            .distinctUntilChanged()
+            .flatMapLatest { if (UrlUtils.isWebUrl(it)) bookmarks.isBookmarked(it) else MutableStateFlow(false) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    }
 
-    private val suggestionSource = SuggestionSource(history, bookmarks) { settings }
-    private val permissions = WebPermissionCoordinator(
-        app, viewModelScope, sites,
-        showPrompt = { prompts.add(it) },
-        requestRuntime = ::requestRuntimePermissions,
-        dismissPrompt = { prompts.remove(it) },
-    )
+    val savedArticlesList: StateFlow<List<SavedArticle>> by lazy(LazyThreadSafetyMode.NONE) {
+        savedArticles.articles
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }
+
+    val isArticleSaved: StateFlow<Boolean> by lazy(LazyThreadSafetyMode.NONE) {
+        snapshotFlow { tabs.selected?.url.orEmpty() }
+            .distinctUntilChanged()
+            .flatMapLatest { if (UrlUtils.isWebUrl(it)) savedArticles.isSaved(it) else MutableStateFlow(false) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    }
+
+    var savingOffline by mutableStateOf(false)
+        private set
+
+    var ttsState by mutableStateOf(TtsState.IDLE)
+        private set
+    var ttsProgress by mutableFloatStateOf(0f)
+        private set
+    var readingAloud by mutableStateOf(false)
+        private set
+    private var readAloudInitialized = false
+    private val readAloud by lazy(LazyThreadSafetyMode.NONE) {
+        readAloudInitialized = true
+        ReadAloud(app) { state, progress ->
+            ttsState = state
+            ttsProgress = progress
+            readingAloud = state == TtsState.PLAYING || state == TtsState.PREPARING
+        }
+    }
+
+    private var blobDownloaderInitialized = false
+    private val blobDownloader by lazy(LazyThreadSafetyMode.NONE) {
+        blobDownloaderInitialized = true
+        BlobDownloader(app, viewModelScope, downloads) { message, id ->
+            snackbar(message, if (id != null) str(R.string.view) else null) { screen = Screen.DOWNLOADS }
+        }
+    }
+
+    private val suggestionSource by lazy(LazyThreadSafetyMode.NONE) { SuggestionSource(history, bookmarks) { settings } }
+    private val permissions by lazy(LazyThreadSafetyMode.NONE) {
+        WebPermissionCoordinator(
+            app, viewModelScope, sites,
+            showPrompt = { prompts.add(it) },
+            requestRuntime = ::requestRuntimePermissions,
+            dismissPrompt = { prompts.remove(it) },
+        )
+    }
     private val ready = CompletableDeferred<Unit>()
     private var suggestJob: Job? = null
     private var scrollAccum = 0
     private var ignoreScrollUntil = 0L
-
-    init {
-        // Find belongs to the page it searched; switching tabs closes it instead of showing that page's count here.
-        viewModelScope.launch { snapshotFlow { tabs.selectedId }.collect { id -> if (find != null && find?.tabId != id) closeFind() } }
-        // ponytail: top-level documents only; media inside cross-origin iframes (embedded players) keeps playing.
-        MediaService.pauseAll = { tabs.tabs.forEach { it.webView?.evaluateJavascript("document.querySelectorAll('video,audio').forEach(m => m.pause())", null) } }
-        viewModelScope.launch {
-            // The last session ended without the swipe cleanup running (the system had stopped its service).
-            if (settings.clearOnExit && ExitCleanup.pending(app)) runCatching { ExitCleanup.run(app, container) }
-            val restored = settings.restoreTabs && tabs.restore()
-            if (!restored || settings.alwaysIncognito) openHomeTab(settings.alwaysIncognito)
-            // Leftovers from a session that could not be deleted while the app was running.
-            tabs.sweepIncognitoProfiles()
-            ready.complete(Unit)
-        }
-        viewModelScope.launch {
-            settingsState.collect { s ->
-                tabs.tabs.forEach { t -> t.webView?.let { factory.applyGlobal(it, s); factory.prepare(t, it, t.url) } }
-            }
-        }
-        viewModelScope.launch {
-            settingsState.map { it.filterLists }.distinctUntilChanged().collect { blocker.reload(it) }
-        }
-        viewModelScope.launch {
-            snapshotFlow { tabs.selected?.url }.distinctUntilChanged().collect { chromeVisible = true; autofillOffer = null }
-        }
-        viewModelScope.launch {
-            downloads.events.collect { e ->
-                if (e.success && e.contentUri.isNotEmpty()) snackbar(str(R.string.file_downloaded, e.fileName), str(R.string.open)) { openFile(e.contentUri, e.mimeType, e.fileName) }
-                else if (!e.success) snackbar(str(R.string.file_failed_to_download, e.fileName), str(R.string.view)) { screen = Screen.DOWNLOADS }
-            }
-        }
-        viewModelScope.launch {
-            snapshotFlow { tabs.tabs.any { it.incognito } }.distinctUntilChanged()
-                .collect { any -> if (!any) downloads.clearIncognito() }
-        }
-    }
-
-    /** Shows the welcome tour again, even in a session that started from a link. */
-    fun replayOnboarding() {
-        onboardingSuppressed = false
-        screen = Screen.BROWSER
-        launchSettings { it.copy(onboardingCompleted = false) }
-    }
-
-    fun launchSettings(block: (Settings) -> Settings) { viewModelScope.launch { store.update(block) } }
+    private var deferredInitStarted = false
+    private var networkCallbackRegistered = false
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
@@ -254,8 +268,76 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
     }
 
     init {
-        app.getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(networkCallback)
+        // Find belongs to the page it searched; switching tabs closes it instead of showing that page's count here.
+        viewModelScope.launch { snapshotFlow { tabs.selectedId }.collect { id -> if (find != null && find?.tabId != id) closeFind() } }
+        // ponytail: top-level documents only; media inside cross-origin iframes (embedded players) keeps playing.
+        MediaService.pauseAll = { tabs.tabs.forEach { it.webView?.evaluateJavascript("document.querySelectorAll('video,audio').forEach(m => m.pause())", null) } }
+        viewModelScope.launch {
+            // The last session ended without the swipe cleanup running (the system had stopped its service).
+            if (settings.clearOnExit && withContext(Dispatchers.IO) { ExitCleanup.pending(app) }) {
+                runCatching { ExitCleanup.run(app, container) }
+            }
+            val restored = settings.restoreTabs && tabs.restore()
+            if (!restored || settings.alwaysIncognito) openHomeTab(settings.alwaysIncognito)
+            ready.complete(Unit)
+        }
+        viewModelScope.launch {
+            settingsState.collect { s ->
+                tabs.tabs.forEach { t -> t.webView?.let { factory.applyGlobal(it, s); factory.prepare(t, it, t.url) } }
+            }
+        }
+        viewModelScope.launch {
+            // Initial load runs in AppContainer.onFirstFrameRendered() or WebViewFactory.create(); only react to changes here.
+            settingsState.map { it.filterLists }.distinctUntilChanged().drop(1).collect { blocker.reload(it) }
+        }
+        viewModelScope.launch {
+            snapshotFlow { tabs.selected?.url }.distinctUntilChanged().collect {
+                chromeVisible = true
+                autofillOffer = null
+                if (ttsState != TtsState.IDLE) stopReading()
+            }
+        }
+        viewModelScope.launch {
+            var hadIncognito = false
+            snapshotFlow { tabs.tabs.any { it.incognito } }.distinctUntilChanged().collect { any ->
+                if (any) hadIncognito = true
+                else if (hadIncognito) {
+                    hadIncognito = false
+                    downloads.clearIncognito()
+                }
+            }
+        }
     }
+
+    /** Initializes non-critical observers and cleanup tasks once the initial Activity frame has rendered. */
+    fun onFirstFrameRendered() {
+        if (deferredInitStarted) return
+        deferredInitStarted = true
+        runCatching {
+            app.getSystemService(ConnectivityManager::class.java)?.registerDefaultNetworkCallback(networkCallback)
+            networkCallbackRegistered = true
+        }
+        viewModelScope.launch {
+            ready.await()
+            // Leftovers from a session that could not be deleted while the app was running.
+            tabs.sweepIncognitoProfiles()
+        }
+        viewModelScope.launch {
+            container.downloadEvents.collect { e ->
+                if (e.success && e.contentUri.isNotEmpty()) snackbar(str(R.string.file_downloaded, e.fileName), str(R.string.open)) { openFile(e.contentUri, e.mimeType, e.fileName) }
+                else if (!e.success) snackbar(str(R.string.file_failed_to_download, e.fileName), str(R.string.view)) { screen = Screen.DOWNLOADS }
+            }
+        }
+    }
+
+    /** Shows the welcome tour again, even in a session that started from a link. */
+    fun replayOnboarding() {
+        onboardingSuppressed = false
+        screen = Screen.BROWSER
+        launchSettings { it.copy(onboardingCompleted = false) }
+    }
+
+    fun launchSettings(block: (Settings) -> Settings) { viewModelScope.launch { store.update(block) } }
 
     fun setPageBackground(color: Int) { pageBackground = color }
 
@@ -427,11 +509,23 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
 
     fun startEditing() {
         val tab = tabs.selected
-        omniboxText = tab?.url?.takeIf { UrlUtils.isWebUrl(it) }.orEmpty()
+        val url = tab?.url?.takeIf { UrlUtils.isWebUrl(it) }.orEmpty()
+        omniboxText = url
         editing = true
         chromeVisible = true
+        suggestJob?.cancel()
         suggestions.value = emptyList()
         loadClipboardSuggestion()
+        val incognito = tab?.incognito == true
+        if (url.isBlank()) {
+            suggestJob = viewModelScope.launch {
+                val init = suggestionSource.initial(incognito)
+                val clip = suggestions.value.filter { it.kind == SuggestionKind.CLIPBOARD }
+                suggestions.value = (clip + init).distinctBy { it.text.lowercase() }
+            }
+        } else {
+            onOmniboxText(url)
+        }
     }
 
     fun dictateStarted() { dictateOnOpen = false }
@@ -449,29 +543,32 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
     fun onOmniboxText(text: String) {
         omniboxText = text
         suggestJob?.cancel()
+        val tab = tabs.selected
+        val incognito = tab?.incognito == true
         suggestJob = viewModelScope.launch {
             if (text.isBlank()) {
-                suggestions.value = suggestions.value.filter { it.kind == SuggestionKind.CLIPBOARD }
+                val clip = suggestions.value.filter { it.kind == SuggestionKind.CLIPBOARD }
+                val init = suggestionSource.initial(incognito)
+                suggestions.value = (clip + init).distinctBy { it.text.lowercase() }
                 return@launch
             }
-            // Wait for a typing pause and swap the list once. The old list stays until the new one is ready, because
-            // redrawing it on every keystroke made the field jump under the user's fingers.
+            val local = suggestionSource.local(text)
+            suggestions.value = local
+            // Debounce remote search suggestions so rapid typing never floods the network.
             delay(SUGGEST_DEBOUNCE_MS)
             if (UrlUtils.isUrl(text)) {
                 val target = UrlUtils.resolve(text, settings.searchEngine)
-                val tab = tabs.selected
-                factory.preconnect(target, tab?.incognito == true)
+                factory.preconnect(target, incognito)
                 tab?.webView?.let { factory.prerender(it, target) }
             }
-            val local = suggestionSource.local(text)
-            val private = tabs.selected?.incognito == true
-            val remote = if (settings.searchSuggestions && !private && !UrlUtils.isUrl(text)) suggestionSource.remote(text) else emptyList()
-            suggestions.value = local + remote
+            val remote = if (settings.searchSuggestions && !incognito && !UrlUtils.isUrl(text)) suggestionSource.remote(text) else emptyList()
+            val seen = local.mapTo(HashSet()) { it.text.lowercase() }
+            suggestions.value = local + remote.filter { it.text.lowercase() !in seen }
         }
     }
 
     private fun loadClipboardSuggestion() {
-        val cm = app.getSystemService(ClipboardManager::class.java)
+        val cm = app.getSystemService(ClipboardManager::class.java) ?: return
         val desc = cm.primaryClipDescription ?: return
         if (!desc.hasMimeType("text/plain") && !desc.hasMimeType("text/uri-list")) return
         val text = runCatching { cm.primaryClip?.getItemAt(0)?.coerceToText(app)?.toString() }.getOrNull()?.trim().orEmpty()
@@ -626,24 +723,126 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
             stopReading()
             ReaderMode.hide(view)
         } else {
-            ReaderMode.show(app, view) { ok ->
+            ReaderMode.show(
+                context = app,
+                view = view,
+                theme = settings.readerTheme,
+                reducedMotion = ReaderMode.isReducedMotion(app, settings),
+            ) { ok ->
                 tab.readerActive = ok
-                if (!ok) snackbar(str(R.string.no_article_found_on_this_page))
+                if (ok) tab.readerAvailable = true
+                else snackbar(str(R.string.no_article_found_on_this_page))
             }
         }
     }
 
+    /** Switches between Dark and Light reading themes smoothly and persists the preference locally. */
+    fun toggleReaderTheme() {
+        val next = if (settings.readerTheme == ReaderThemeMode.DARK) ReaderThemeMode.LIGHT else ReaderThemeMode.DARK
+        launchSettings { it.copy(readerTheme = next) }
+        val reduced = ReaderMode.isReducedMotion(app, settings)
+        tabs.selected?.takeIf { it.readerActive }?.webView?.let { view ->
+            ReaderMode.applyTheme(view, next, reduced)
+        }
+    }
+
+    /** Plays, pauses, or resumes TTS playback for the active Reader Mode article. */
+    fun toggleReaderTts() {
+        when (ttsState) {
+            TtsState.PLAYING -> readAloud.pause()
+            TtsState.PAUSED -> readAloud.resume()
+            TtsState.PREPARING -> readAloud.stop()
+            TtsState.IDLE -> {
+                val view = tabs.selected?.webView ?: return
+                ReaderMode.extractTtsText(view) { text ->
+                    if (text.isBlank()) snackbar(str(R.string.nothing_to_read_on_this_page))
+                    else readAloud.speak(text)
+                }
+            }
+        }
+    }
+
+    /** Saves the active Reader Mode article's extracted text and images locally, or removes it if saved. */
+    fun toggleOfflineSave() {
+        val tab = tabs.selected ?: return
+        val url = tab.url.takeIf { UrlUtils.isWebUrl(it) } ?: return
+        if (isArticleSaved.value) {
+            viewModelScope.launch {
+                savedArticles.deleteByUrl(url)
+                snackbar(str(R.string.removed_from_offline_reading))
+            }
+            return
+        }
+        val view = tab.webView ?: return
+        if (savingOffline) return
+        savingOffline = true
+        ReaderMode.extractArticle(view, url) { extracted ->
+            if (extracted == null) {
+                savingOffline = false
+                snackbar(str(R.string.no_article_found_on_this_page))
+                return@extractArticle
+            }
+            viewModelScope.launch {
+                val cookie = runCatching { CookieManager.getInstance().getCookie(url).orEmpty() }.getOrDefault("")
+                runCatching { savedArticles.saveArticle(extracted, cookie) }
+                    .onSuccess { saved ->
+                        savingOffline = false
+                        snackbar(
+                            str(R.string.saved_for_offline_reading, saved.imageCount),
+                            str(R.string.view),
+                        ) { screen = Screen.SAVED_ARTICLES }
+                    }
+                    .onFailure {
+                        savingOffline = false
+                        snackbar(str(R.string.could_not_save_article_offline))
+                    }
+            }
+        }
+    }
+
+    /** Opens a previously saved offline article in Reader Mode without requiring network access. */
+    fun openSavedArticle(article: SavedArticle) {
+        viewModelScope.launch {
+            val reduced = ReaderMode.isReducedMotion(app, settings)
+            val loaded = savedArticles.loadOfflineHtml(article.id, settings.readerTheme, reduced)
+            if (loaded == null) {
+                snackbar(str(R.string.could_not_open_this))
+                return@launch
+            }
+            val (saved, html) = loaded
+            val current = tabs.selected
+            val target = if (current != null && current.isHome && !current.incognito) current else openHomeTab(incognito = false)
+            tabs.loadOfflineHtml(target, saved.url, saved.title, html)
+            tabs.select(target)
+            screen = Screen.BROWSER
+            stopEditing(navigating = true)
+            chromeVisible = true
+        }
+    }
+
+    fun deleteSavedArticle(article: SavedArticle) {
+        viewModelScope.launch {
+            savedArticles.delete(article.id)
+            snackbar(str(R.string.removed_from_offline_reading))
+        }
+    }
+
+    fun clearSavedArticles() {
+        viewModelScope.launch { savedArticles.clearAll() }
+    }
+
     /** Speaks the text of the page as it is shown, so reader mode reads the article and nothing else. */
     fun toggleReadAloud() {
-        if (readingAloud) return stopReading()
+        if (readingAloud || ttsState == TtsState.PAUSED) return stopReading()
         val view = tabs.selected?.webView ?: return
-        view.evaluateJavascript("(document.body&&document.body.innerText||'')") { raw ->
-            val text = runCatching { JSONObject("{\"t\":$raw}").getString("t") }.getOrNull().orEmpty()
+        ReaderMode.extractTtsText(view) { text ->
             if (text.isBlank()) snackbar(str(R.string.nothing_to_read_on_this_page)) else readAloud.speak(text)
         }
     }
 
-    fun stopReading() = readAloud.stop()
+    fun stopReading() {
+        if (readAloudInitialized) readAloud.stop()
+    }
 
     /** Hands the page to the system print dialog, which also offers "Save as PDF". */
     fun printPage() {
@@ -838,7 +1037,7 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
     fun copySource() {
         val source = openSource ?: return
         // The clipboard goes through Binder, which refuses anything past roughly 1 MB.
-        runCatching { app.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(source.name, source.text)) }
+        runCatching { app.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(source.name, source.text)) }
             .onSuccess { snackbar(str(R.string.source_copied)) }.onFailure { snackbar(str(R.string.too_large_to_copy)) }
     }
 
@@ -949,7 +1148,7 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
                 putBoolean(ClipboardClearReceiver.MARK, true)
             }
         }
-        app.getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
+        runCatching { app.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(clip) }
         ClipboardClearReceiver.schedule(app, CLIPBOARD_CLEAR_MS)
         snackbar(str(R.string.label_copied, label))
     }
@@ -1082,14 +1281,6 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
         tabs.tabFor(view)?.let { tabs.close(it, remember = false) }
     }
 
-    var readingAloud by mutableStateOf(false)
-        private set
-    private val readAloud = ReadAloud(app) { readingAloud = it }
-
-    private val blobDownloader = BlobDownloader(app, viewModelScope, downloads) { message, id ->
-        snackbar(message, if (id != null) str(R.string.view) else null) { screen = Screen.DOWNLOADS }
-    }
-
     override fun onBlobMessage(tab: BrowserTab, origin: String, data: String, reply: JavaScriptReplyProxy) =
         blobDownloader.onMessage(tab, origin, data) { reply.postMessage(it) }
 
@@ -1139,7 +1330,7 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
     fun answerPaste(prompt: Prompt.Paste, allow: Boolean) {
         prompts.remove(prompt)
         val cm = app.getSystemService(ClipboardManager::class.java)
-        val text = if (allow) runCatching { cm.primaryClip?.getItemAt(0)?.coerceToText(app)?.toString() }.getOrNull().orEmpty() else null
+        val text = if (allow && cm != null) runCatching { cm.primaryClip?.getItemAt(0)?.coerceToText(app)?.toString() }.getOrNull().orEmpty() else null
         val json = if (text != null) JSONObject().put("ok", true).put("text", text) else JSONObject().put("ok", false)
         runCatching { prompt.reply.postMessage(json.toString()) }
     }
@@ -1211,8 +1402,11 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
 
     override fun onCleared() {
         MediaService.pauseAll = null
-        readAloud.release()
-        runCatching { app.getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(networkCallback) }
+        if (readAloudInitialized) readAloud.release()
+        if (networkCallbackRegistered) {
+            runCatching { app.getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(networkCallback) }
+            networkCallbackRegistered = false
+        }
         tabs.destroyAll()
         super.onCleared()
     }

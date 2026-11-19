@@ -1,59 +1,48 @@
 package app.eddy.browser.ui.components
 
-import app.eddy.browser.R
-import app.eddy.browser.util.str
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.animation.core.animateFloatAsState
-import app.eddy.browser.ui.animation.spatialSpring
+import app.eddy.browser.R
+import app.eddy.browser.ui.sakuga.SakugaAlertDialog
+import app.eddy.browser.ui.sakuga.SakugaCheckbox
+import app.eddy.browser.ui.sakuga.SakugaEmptyState
+import app.eddy.browser.ui.sakuga.SakugaIconButton
+import app.eddy.browser.ui.sakuga.SakugaOutlinedTextField
+import app.eddy.browser.ui.sakuga.SakugaRadioButton
+import app.eddy.browser.ui.sakuga.SakugaTextButton
+import app.eddy.browser.ui.sakuga.sakugaPressSquash
+import app.eddy.browser.ui.sakuga.SakugaParticlePreset
 import app.eddy.browser.ui.theme.Dimens
+import app.eddy.browser.util.str
+import androidx.compose.foundation.layout.Column
 
-/** Icon button with a 48dp target and a springy press that never blocks the tap. */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+/** Icon button with a 48dp target, balanced optical size, and Sakuga press/hover/particle feedback. */
 @Composable
 fun EddyIconButton(
     icon: ImageVector,
@@ -62,19 +51,19 @@ fun EddyIconButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     tint: Color = MaterialTheme.colorScheme.onSurface,
+    iconSize: Dp = 22.dp,
+    particlePreset: SakugaParticlePreset = SakugaParticlePreset.SUBTLE,
 ) {
-    val source = remember { MutableInteractionSource() }
-    val pressed by source.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) 0.86f else 1f, spatialSpring(), label = "press")
-    IconButton(
+    SakugaIconButton(
+        icon = icon,
+        contentDescription = contentDescription,
         onClick = onClick,
+        modifier = modifier,
         enabled = enabled,
-        interactionSource = source,
-        modifier = modifier.sizeIn(minWidth = Dimens.touchTarget, minHeight = Dimens.touchTarget).scale(scale),
-        colors = IconButtonDefaults.iconButtonColors(contentColor = tint),
-    ) {
-        Icon(icon, contentDescription = contentDescription)
-    }
+        tint = tint,
+        iconSize = iconSize,
+        particlePreset = particlePreset,
+    )
 }
 
 @Composable
@@ -89,11 +78,11 @@ fun TextInputDialog(
     onConfirm: (String) -> Unit,
 ) {
     var text by remember { mutableStateOf(initial) }
-    AlertDialog(
+    SakugaAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            OutlinedTextField(
+            SakugaOutlinedTextField(
                 value = text,
                 onValueChange = { text = it },
                 label = { Text(label) },
@@ -103,8 +92,17 @@ fun TextInputDialog(
                 modifier = Modifier.fillMaxWidth(),
             )
         },
-        confirmButton = { TextButton(onClick = { onConfirm(text.trim()) }, enabled = validate(text)) { Text(confirmLabel) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
+        confirmButton = {
+            SakugaTextButton(
+                onClick = { onConfirm(text.trim()) },
+                enabled = validate(text),
+                burstOnClick = true,
+                particlePreset = SakugaParticlePreset.SUCCESS,
+            ) {
+                Text(confirmLabel)
+            }
+        },
+        dismissButton = { SakugaTextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
     )
 }
 
@@ -116,12 +114,14 @@ fun ConfirmDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
-    AlertDialog(
+    SakugaAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = { Text(message) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(confirmLabel) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
+        confirmButton = {
+            SakugaTextButton(onClick = onConfirm, burstOnClick = true) { Text(confirmLabel) }
+        },
+        dismissButton = { SakugaTextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
     )
 }
 
@@ -134,18 +134,27 @@ fun <T> ChoiceDialog(
     onDismiss: () -> Unit,
     onSelect: (T) -> Unit,
 ) {
-    AlertDialog(
+    SakugaAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 options.forEach { option ->
+                    val source = remember { MutableInteractionSource() }
                     Row(
-                        Modifier.fillMaxWidth().sizeIn(minHeight = Dimens.touchTarget)
-                            .selectable(option == selected, role = Role.RadioButton) { onSelect(option); onDismiss() },
+                        Modifier
+                            .fillMaxWidth()
+                            .sizeIn(minHeight = Dimens.touchTarget)
+                            .sakugaPressSquash(source, pressX = 1.02f, pressY = 0.96f)
+                            .selectable(
+                                selected = option == selected,
+                                interactionSource = source,
+                                indication = androidx.compose.material3.ripple(bounded = true),
+                                role = Role.RadioButton,
+                            ) { onSelect(option); onDismiss() },
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        RadioButton(selected = option == selected, onClick = null)
+                        SakugaRadioButton(selected = option == selected, onClick = null)
                         Spacer(Modifier.width(12.dp))
                         Text(label(option), style = MaterialTheme.typography.bodyLarge)
                     }
@@ -153,18 +162,26 @@ fun <T> ChoiceDialog(
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
+        dismissButton = { SakugaTextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
     )
 }
 
 @Composable
 fun CheckRow(text: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    val source = remember { MutableInteractionSource() }
     Row(
-        Modifier.fillMaxWidth().sizeIn(minHeight = Dimens.touchTarget)
-            .clickable(role = Role.Checkbox) { onChange(!checked) },
+        Modifier
+            .fillMaxWidth()
+            .sizeIn(minHeight = Dimens.touchTarget)
+            .sakugaPressSquash(source, pressX = 1.02f, pressY = 0.96f)
+            .clickable(
+                interactionSource = source,
+                indication = androidx.compose.material3.ripple(bounded = true),
+                role = Role.Checkbox,
+            ) { onChange(!checked) },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Checkbox(checked = checked, onCheckedChange = null)
+        SakugaCheckbox(checked = checked, onCheckedChange = null)
         Spacer(Modifier.width(12.dp))
         Text(text, style = MaterialTheme.typography.bodyLarge)
     }
@@ -172,13 +189,5 @@ fun CheckRow(text: String, checked: Boolean, onChange: (Boolean) -> Unit) {
 
 @Composable
 fun EmptyState(icon: ImageVector, title: String, message: String, modifier: Modifier = Modifier) {
-    Column(
-        modifier.fillMaxWidth().padding(Dimens.gutterLarge * 2),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Icon(icon, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.outline)
-        Text(title, style = MaterialTheme.typography.titleMedium)
-        Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
+    SakugaEmptyState(icon = icon, title = title, message = message, modifier = modifier)
 }

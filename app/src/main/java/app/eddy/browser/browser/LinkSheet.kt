@@ -4,7 +4,9 @@ import app.eddy.browser.R
 import app.eddy.browser.util.str
 import android.content.ClipData
 import android.content.ClipboardManager
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,10 +24,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -33,6 +35,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.eddy.browser.ui.sakuga.SakugaAnimationController
+import app.eddy.browser.ui.sakuga.SakugaModalBottomSheet
+import app.eddy.browser.ui.sakuga.SakugaParticlePreset
+import app.eddy.browser.ui.sakuga.sakugaPressEffect
 import app.eddy.browser.ui.theme.Dimens
 
 /** Long-press actions for links and images. */
@@ -50,7 +56,7 @@ fun LinkSheet(vm: BrowserViewModel, target: HitTarget, onDismiss: () -> Unit) {
             .onSuccess { vm.snackbar(str(R.string.copied)) }.onFailure { vm.snackbar(str(R.string.too_large_to_copy)) }
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    SakugaModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.navigationBarsPadding().padding(bottom = 16.dp)) {
             // A data: image URL can be megabytes; laying out all of it freezes the UI even with maxLines.
             Text(primary.take(500), Modifier.padding(horizontal = Dimens.gutterLarge, vertical = 8.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -74,8 +80,16 @@ fun LinkSheet(vm: BrowserViewModel, target: HitTarget, onDismiss: () -> Unit) {
 
 @Composable
 private fun Action(icon: ImageVector, label: String, onClick: () -> Unit) {
+    val source = remember { MutableInteractionSource() }
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button, onClick = onClick).padding(horizontal = Dimens.gutterLarge),
+        Modifier.fillMaxWidth().heightIn(min = 56.dp)
+            .sakugaPressEffect(
+                interactionSource = source,
+                role = SakugaAnimationController.ComponentRole.CARD,
+                particlePreset = SakugaParticlePreset.SUBTLE,
+            )
+            .clickable(interactionSource = source, indication = LocalIndication.current, role = Role.Button, onClick = onClick)
+            .padding(horizontal = Dimens.gutterLarge),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, tint = MaterialTheme.colorScheme.primary)

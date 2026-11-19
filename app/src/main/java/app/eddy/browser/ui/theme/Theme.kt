@@ -18,6 +18,8 @@ import app.eddy.browser.data.models.MotionPref
 import app.eddy.browser.data.models.Settings
 import app.eddy.browser.data.models.ThemeMode
 import app.eddy.browser.ui.animation.rememberSystemReducedMotion
+import app.eddy.browser.ui.sakuga.LocalSakugaMotionPreset
+import app.eddy.browser.ui.sakuga.SakugaMotionPreset
 
 val EddyShapes = Shapes(
     extraSmall = RoundedCornerShape(8.dp),
@@ -44,8 +46,12 @@ fun EddyTheme(settings: Settings, incognito: Boolean = false, content: @Composab
     val scheme = when {
         incognito -> paletteScheme(Palette.SLATE, dark = true, amoled = settings.amoled)
         settings.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val s = if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-            if (amoled) s.toAmoled() else s
+            runCatching {
+                val s = if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+                if (amoled) s.toAmoled() else s
+            }.getOrElse {
+                paletteScheme(Palette.of(settings.palette), dark, amoled)
+            }
         }
         else -> paletteScheme(Palette.of(settings.palette), dark, amoled)
     }
@@ -53,6 +59,7 @@ fun EddyTheme(settings: Settings, incognito: Boolean = false, content: @Composab
     CompositionLocalProvider(
         LocalReducedMotion provides reduced,
         LocalHapticsEnabled provides settings.hapticsEnabled,
+        LocalSakugaMotionPreset provides if (reduced) SakugaMotionPreset.SOFT else SakugaMotionPreset.PREMIUM,
     ) {
         MaterialExpressiveTheme(
             colorScheme = scheme,

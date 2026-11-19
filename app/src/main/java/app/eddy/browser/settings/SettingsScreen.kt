@@ -67,7 +67,7 @@ import androidx.compose.material.icons.rounded.Language
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.requiredSize
-import androidx.compose.material3.FilledTonalButton
+import app.eddy.browser.ui.sakuga.SakugaFilledTonalButton
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
@@ -300,7 +300,7 @@ private fun AdvancedSettings(vm: BrowserViewModel, s: Settings) {
 private fun AboutSettings(vm: BrowserViewModel) {
     val context = LocalContext.current
     val roleManager = remember { context.getSystemService(RoleManager::class.java) }
-    fun held() = roleManager.isRoleHeld(RoleManager.ROLE_BROWSER)
+    fun held() = roleManager?.isRoleHeld(RoleManager.ROLE_BROWSER) == true
     var isDefault by remember { mutableStateOf(held()) }
     // The choice is made in a system screen, so re-check whenever we come back to the foreground.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { isDefault = held() }
@@ -314,10 +314,12 @@ private fun AboutSettings(vm: BrowserViewModel) {
             ActionRow(str(R.string.default_browser), {}, str(R.string.eddy_is_your_default_browser), Icons.Rounded.CheckCircle)
         } else {
             ActionRow(str(R.string.make_eddy_your_default_browser), {
-                if (roleManager.isRoleAvailable(RoleManager.ROLE_BROWSER)) {
-                    requestRole.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_BROWSER))
+                if (roleManager?.isRoleAvailable(RoleManager.ROLE_BROWSER) == true) {
+                    runCatching { requestRole.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_BROWSER)) }
                 } else {
-                    context.startActivity(Intent(AndroidSettings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    runCatching {
+                        context.startActivity(Intent(AndroidSettings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
                 }
             }, str(R.string.opens_a_system_prompt))
         }
@@ -352,11 +354,11 @@ private fun AboutHeader(open: (String) -> Unit) {
             textAlign = TextAlign.Center,
         )
         Row(Modifier.padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalButton({ open(SITE_URL) }) {
+            SakugaFilledTonalButton({ open(SITE_URL) }) {
                 Icon(Icons.Rounded.Language, null, Modifier.size(18.dp))
                 Text(str(R.string.website), Modifier.padding(start = 8.dp))
             }
-            FilledTonalButton({ open(REPO_URL) }) {
+            SakugaFilledTonalButton({ open(REPO_URL) }) {
                 Icon(painterResource(R.drawable.ic_github), null, Modifier.size(18.dp))
                 Text(str(R.string.github), Modifier.padding(start = 8.dp))
             }

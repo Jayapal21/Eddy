@@ -37,7 +37,6 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.material3.FilterChip
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Restore
@@ -46,16 +45,10 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Text
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.rememberSwipeToDismissBoxState
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -95,6 +88,12 @@ import app.eddy.browser.ui.components.TextInputDialog
 import app.eddy.browser.ui.components.EmptyState
 import app.eddy.browser.ui.components.SiteIcon
 import app.eddy.browser.ui.components.EddyIconButton
+import app.eddy.browser.ui.sakuga.SakugaCard
+import app.eddy.browser.ui.sakuga.SakugaExtendedFab
+import app.eddy.browser.ui.sakuga.SakugaFilterChip
+import app.eddy.browser.ui.sakuga.SakugaSegmentedRow
+import app.eddy.browser.ui.sakuga.SakugaTabItem
+import app.eddy.browser.ui.sakuga.SakugaTextButton
 import app.eddy.browser.ui.theme.Dimens
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -125,17 +124,18 @@ fun TabSwitcher(vm: BrowserViewModel, settings: Settings, modifier: Modifier = M
     Box(modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = Dimens.gutter, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                SingleChoiceSegmentedButtonRow(Modifier.weight(1f)) {
-                    SegmentedButton(
-                        selected = !incognito, onClick = { vm.switcherIncognito = false; haptics.tick() },
-                        shape = SegmentedButtonDefaults.itemShape(0, 2),
-                    ) { Text(str(R.string.tabs, normalCount)) }
-                    SegmentedButton(
-                        selected = incognito, onClick = { vm.switcherIncognito = true; haptics.tick() },
-                        shape = SegmentedButtonDefaults.itemShape(1, 2),
-                        icon = { Icon(Icons.Rounded.VisibilityOff, null, Modifier.size(18.dp)) },
-                    ) { Text(str(R.string.incognito, incognitoCount)) }
-                }
+                SakugaSegmentedRow(
+                    items = listOf(
+                        SakugaTabItem(str(R.string.tabs, normalCount)),
+                        SakugaTabItem(str(R.string.incognito, incognitoCount), Icons.Rounded.VisibilityOff),
+                    ),
+                    selectedIndex = if (incognito) 1 else 0,
+                    onSelect = { idx ->
+                        vm.switcherIncognito = idx == 1
+                        haptics.tick()
+                    },
+                    modifier = Modifier.weight(1f),
+                )
                 Box {
                     EddyIconButton(Icons.Rounded.MoreVert, str(R.string.more_tab_actions), { menu = true })
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -156,10 +156,10 @@ fun TabSwitcher(vm: BrowserViewModel, settings: Settings, modifier: Modifier = M
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = Dimens.gutter),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    item { FilterChip(group == null, { vm.switcherGroup = null; haptics.tick() }, { Text(str(R.string.all_tabs)) }) }
+                    item { SakugaFilterChip(group == null, { vm.switcherGroup = null; haptics.tick() }, { Text(str(R.string.all_tabs)) }) }
                     items(groups.size) { i ->
                         val g = groups[i]
-                        FilterChip(
+                        SakugaFilterChip(
                             group == g, { vm.switcherGroup = g; haptics.tick() }, { Text(g) },
                             leadingIcon = { Icon(Icons.Rounded.Folder, null, Modifier.size(18.dp)) },
                         )
@@ -234,8 +234,8 @@ fun TabSwitcher(vm: BrowserViewModel, settings: Settings, modifier: Modifier = M
         }
 
         Box(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(16.dp).fillMaxWidth()) {
-            TextButton(onClick = { vm.screen = app.eddy.browser.browser.Screen.BROWSER }, Modifier.align(Alignment.CenterStart).height(Dimens.touchTarget)) { Text(str(R.string.done)) }
-            ExtendedFloatingActionButton(
+            SakugaTextButton(onClick = { vm.screen = app.eddy.browser.browser.Screen.BROWSER }, Modifier.align(Alignment.CenterStart).height(Dimens.touchTarget)) { Text(str(R.string.done)) }
+            SakugaExtendedFab(
                 onClick = { haptics.confirm(); vm.newTab(incognito, group) },
                 icon = { Icon(Icons.Rounded.Add, null) },
                 text = { Text(if (incognito) str(R.string.new_incognito_tab) else str(R.string.new_tab)) },
@@ -296,12 +296,12 @@ private fun TabCard(vm: BrowserViewModel, tab: BrowserTab, selected: Boolean, th
         gesturesEnabled = !dragging,
         onDismiss = { haptics.confirm(); vm.closeTab(tab) },
     ) {
-        Surface(
+        SakugaCard(
+            onClick = { vm.selectTab(tab) },
             modifier = Modifier.semantics { contentDescription = str(R.string.tab_card_description, title, tab.host) },
             shape = RoundedCornerShape(28.dp),
             color = if (tab.incognito) scheme.tertiaryContainer.copy(alpha = 0.5f) else scheme.surfaceContainerHigh,
             border = if (border > 0.05f) androidx.compose.foundation.BorderStroke(border.dp, scheme.primary) else null,
-            onClick = { vm.selectTab(tab) },
         ) {
             Column(Modifier.padding(6.dp)) {
                 Row(Modifier.padding(start = 8.dp), verticalAlignment = Alignment.CenterVertically) {

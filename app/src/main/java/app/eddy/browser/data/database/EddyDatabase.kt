@@ -16,10 +16,15 @@ class Converters {
 @Database(
     entities = [
         HistoryEntry::class, Bookmark::class, BookmarkFolder::class, DownloadEntity::class, SiteSettings::class,
-        LoginEntity::class, LoginBlock::class,
+        LoginEntity::class, LoginBlock::class, SavedArticle::class, SavedArticleImage::class,
     ],
-    version = 4,
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4)],
+    version = 5,
+    autoMigrations = [
+        AutoMigration(from = 1, to = 2),
+        AutoMigration(from = 2, to = 3),
+        AutoMigration(from = 3, to = 4),
+        AutoMigration(from = 4, to = 5),
+    ],
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -29,6 +34,7 @@ abstract class EddyDatabase : RoomDatabase() {
     abstract fun downloads(): DownloadDao
     abstract fun sites(): SiteSettingsDao
     abstract fun logins(): LoginDao
+    abstract fun savedArticles(): SavedArticleDao
 
     companion object {
         fun create(context: Context): EddyDatabase =

@@ -47,6 +47,7 @@ import app.eddy.browser.settings.AppIcon
 import app.eddy.browser.browser.BrowserViewModel
 import app.eddy.browser.browser.MediaService
 import app.eddy.browser.browser.UiEffect
+import app.eddy.browser.data.models.ReaderThemeMode
 import app.eddy.browser.data.models.ThemeMode
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
@@ -98,12 +99,16 @@ class MainActivity : ComponentActivity() {
         setContent {
             val settings by vm.settingsState.collectAsStateWithLifecycle()
             val systemDark = isSystemInDarkTheme()
-            val incognito = vm.tabs.selected?.incognito == true
-            val dark = when (settings.themeMode) {
+            val selectedTab = vm.tabs.selected
+            val incognito = selectedTab?.incognito == true
+            val readerDark = if (selectedTab?.readerActive == true) {
+                settings.readerTheme == ReaderThemeMode.DARK
+            } else null
+            val dark = readerDark ?: (when (settings.themeMode) {
                 ThemeMode.SYSTEM -> systemDark
                 ThemeMode.LIGHT -> false
                 ThemeMode.DARK -> true
-            } || incognito
+            } || incognito)
             DisposableEffect(dark) {
                 val style = if (dark) SystemBarStyle.dark(Color.TRANSPARENT) else SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
                 enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
@@ -112,6 +117,10 @@ class MainActivity : ComponentActivity() {
             }
             LaunchedEffect(vm.fullscreen) { if (customView == null) applySystemBars() }
             BrowserRoot(vm)
+        }
+        window.decorView.post {
+            (application as EddyApp).container.onFirstFrameRendered()
+            vm.onFirstFrameRendered()
         }
         lifecycleScope.launch {
             // A permission dialog/file picker can stop this Activity. Do not cancel the
@@ -209,7 +218,7 @@ class MainActivity : ComponentActivity() {
             }
             is UiEffect.Print -> try {
                 getSystemService(PrintManager::class.java)
-                    .print(effect.jobName, effect.adapter, PrintAttributes.Builder().build())
+                    ?.print(effect.jobName, effect.adapter, PrintAttributes.Builder().build())
             } catch (_: Exception) {
                 vm.snackbar(str(R.string.could_not_print_this_page))
             }

@@ -24,7 +24,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Share
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.produceState
@@ -45,6 +44,7 @@ import app.eddy.browser.browser.Screen
 import app.eddy.browser.ui.components.EddyIconButton
 import app.eddy.browser.ui.components.EmptyState
 import app.eddy.browser.ui.components.ScreenScaffold
+import app.eddy.browser.ui.sakuga.SakugaCircularProgress
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -81,7 +81,7 @@ fun PdfScreen(vm: BrowserViewModel) {
         val doc = document
         val count = doc?.pageCount
         when {
-            doc == null || count == null -> Box(Modifier.fillMaxSize().padding(padding), Alignment.Center) { CircularProgressIndicator() }
+            doc == null || count == null -> Box(Modifier.fillMaxSize().padding(padding), Alignment.Center) { SakugaCircularProgress() }
             count == 0 -> EmptyState(Icons.Rounded.Description, str(R.string.can_t_open_this_pdf), str(R.string.the_file_may_be_damaged_or_password_prot), Modifier.padding(padding))
             else -> BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
                 val widthPx = with(LocalDensity.current) { maxWidth.roundToPx() }

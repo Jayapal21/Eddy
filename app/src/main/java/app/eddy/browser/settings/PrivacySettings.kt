@@ -23,14 +23,8 @@ import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VisibilityOff
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
@@ -57,6 +51,12 @@ import app.eddy.browser.ui.components.ChoiceDialog
 import app.eddy.browser.ui.components.CheckRow
 import app.eddy.browser.ui.components.EmptyState
 import app.eddy.browser.ui.components.EddyIconButton
+import app.eddy.browser.ui.sakuga.SakugaAlertDialog
+import app.eddy.browser.ui.sakuga.SakugaOutlinedButton
+import app.eddy.browser.ui.sakuga.SakugaOutlinedTextField
+import app.eddy.browser.ui.sakuga.SakugaParticlePreset
+import app.eddy.browser.ui.sakuga.SakugaSwitch
+import app.eddy.browser.ui.sakuga.SakugaTextButton
 import kotlinx.coroutines.launch
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -117,12 +117,12 @@ private fun ClearDataDialog(vm: BrowserViewModel, onDismiss: () -> Unit) {
     fun rangeLabel(r: Long?) = when (r) { TimeUnit.HOURS.toMillis(1) -> str(R.string.last_hour); TimeUnit.DAYS.toMillis(1) -> str(R.string.last_24_hours); TimeUnit.DAYS.toMillis(7) -> str(R.string.last_7_days); else -> str(R.string.all_time) }
     fun toggle(t: DataType, on: Boolean) { types = if (on) types + t else types - t }
 
-    AlertDialog(
+    SakugaAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(str(R.string.clear_browsing_data)) },
         text = {
             Column {
-                TextButton(onClick = { picking = true }) { Text(str(R.string.browsing_history_range, rangeLabel(range))) }
+                SakugaTextButton(onClick = { picking = true }) { Text(str(R.string.browsing_history_range, rangeLabel(range))) }
                 CheckRow(str(R.string.browsing_history), DataType.HISTORY in types) { toggle(DataType.HISTORY, it) }
                 CheckRow(str(R.string.cookies_and_site_data), DataType.COOKIES in types) { toggle(DataType.COOKIES, it) }
                 CheckRow(str(R.string.cached_images_and_files), DataType.CACHE in types) { toggle(DataType.CACHE, it) }
@@ -131,8 +131,8 @@ private fun ClearDataDialog(vm: BrowserViewModel, onDismiss: () -> Unit) {
                 CheckRow(str(R.string.saved_passwords), DataType.PASSWORDS in types) { toggle(DataType.PASSWORDS, it) }
             }
         },
-        confirmButton = { TextButton(enabled = types.isNotEmpty(), onClick = { vm.clearBrowsingData(types, range); onDismiss() }) { Text(str(R.string.clear)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
+        confirmButton = { SakugaTextButton(enabled = types.isNotEmpty(), burstOnClick = true, onClick = { vm.clearBrowsingData(types, range); onDismiss() }) { Text(str(R.string.clear)) } },
+        dismissButton = { SakugaTextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
     )
     if (picking) ChoiceDialog(str(R.string.time_range), ranges, range, ::rangeLabel, { picking = false }) { range = it }
 }
@@ -159,11 +159,11 @@ fun SitePermissionsSettings(vm: BrowserViewModel) {
                     Text(site.host, style = MaterialTheme.typography.bodyLarge)
                     Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                EddyIconButton(Icons.Rounded.Delete, str(R.string.reset, site.host), { vm.sites.reset(site.host) })
+                EddyIconButton(Icons.Rounded.Delete, str(R.string.reset, site.host), { vm.sites.reset(site.host) }, particlePreset = SakugaParticlePreset.DELETE)
             }
         }
     }
-    OutlinedButton(onClick = vm.sites::resetAll, Modifier.padding(16.dp)) { Text(str(R.string.reset_all_site_permissions)) }
+    SakugaOutlinedButton(onClick = vm.sites::resetAll, Modifier.padding(16.dp), particlePreset = SakugaParticlePreset.DELETE) { Text(str(R.string.reset_all_site_permissions)) }
 }
 
 private fun label(f: SiteFeature) = when (f) {
@@ -199,8 +199,8 @@ fun FilterListsSettings(vm: BrowserViewModel, s: Settings) {
                 if (!list.builtIn) EddyIconButton(Icons.Rounded.Delete, str(R.string.remove, list.name), {
                     vm.blocker.deleteCache(list)
                     vm.launchSettings { it.copy(filterLists = it.filterLists.filterNot { l -> l.id == list.id }) }
-                })
-                Switch(list.enabled, { on ->
+                }, particlePreset = SakugaParticlePreset.DELETE)
+                SakugaSwitch(list.enabled, { on ->
                     vm.launchSettings { it.copy(filterLists = it.filterLists.map { l -> if (l.id == list.id) l.copy(enabled = on) else l }) }
                     // A list enabled for the first time has nothing cached yet; fetch it right away.
                     if (on && !list.builtIn) scope.launch { vm.blocker.update(s.filterLists.map { l -> if (l.id == list.id) l.copy(enabled = true) else l }) }
@@ -224,25 +224,25 @@ fun FilterListsSettings(vm: BrowserViewModel, s: Settings) {
         var name by remember { mutableStateOf("") }
         var url by remember { mutableStateOf("https://") }
         var tracker by remember { mutableStateOf(false) }
-        AlertDialog(
+        SakugaAlertDialog(
             onDismissRequest = { adding = false },
             title = { Text(str(R.string.add_filter_list)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.name)) }, singleLine = true)
-                    OutlinedTextField(url, { url = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.list_url)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
+                    SakugaOutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.name)) }, singleLine = true)
+                    SakugaOutlinedTextField(url, { url = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.list_url)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
                     CheckRow(str(R.string.treat_as_tracker_list), tracker) { tracker = it }
                 }
             },
             confirmButton = {
-                TextButton(enabled = name.isNotBlank() && url.startsWith("https://") && url.length > 10, onClick = {
+                SakugaTextButton(enabled = name.isNotBlank() && url.startsWith("https://") && url.length > 10, burstOnClick = true, onClick = {
                     val list = FilterList(UUID.randomUUID().toString(), name.trim(), url.trim(), tracker = tracker)
                     vm.launchSettings { it.copy(filterLists = it.filterLists + list) }
                     scope.launch { vm.blocker.update(s.filterLists + list) }
                     adding = false
                 }) { Text(str(R.string.add)) }
             },
-            dismissButton = { TextButton(onClick = { adding = false }) { Text(str(R.string.cancel)) } },
+            dismissButton = { SakugaTextButton(onClick = { adding = false }) { Text(str(R.string.cancel)) } },
         )
     }
 }

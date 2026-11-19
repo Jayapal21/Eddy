@@ -1,7 +1,7 @@
 package app.eddy.browser.settings
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -17,9 +17,7 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -32,6 +30,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import app.eddy.browser.ui.components.ChoiceDialog
+import app.eddy.browser.ui.sakuga.SakugaAnimationController
+import app.eddy.browser.ui.sakuga.SakugaParticlePreset
+import app.eddy.browser.ui.sakuga.SakugaSlider
+import app.eddy.browser.ui.sakuga.SakugaSwitch
+import app.eddy.browser.ui.sakuga.sakugaPressEffect
 import app.eddy.browser.ui.theme.Dimens
 
 @Composable
@@ -69,22 +72,71 @@ private fun RowShell(
 
 @Composable
 fun SwitchRow(title: String, checked: Boolean, onChange: (Boolean) -> Unit, subtitle: String? = null, icon: ImageVector? = null, enabled: Boolean = true) {
+    val source = remember { MutableInteractionSource() }
     RowShell(
         icon, title, subtitle,
-        Modifier.toggleable(checked, enabled = enabled, role = Role.Switch, onValueChange = onChange),
-    ) { Switch(checked = checked, onCheckedChange = null, enabled = enabled) }
+        Modifier
+            .sakugaPressEffect(
+                interactionSource = source,
+                enabled = enabled,
+                role = SakugaAnimationController.ComponentRole.TOGGLE,
+                enableParticles = false,
+                enableTouchRipple = false,
+            )
+            .toggleable(
+                value = checked,
+                enabled = enabled,
+                role = Role.Switch,
+                interactionSource = source,
+                indication = androidx.compose.material3.ripple(bounded = true),
+                onValueChange = onChange,
+            ),
+    ) { SakugaSwitch(checked = checked, onCheckedChange = null, enabled = enabled) }
 }
 
 @Composable
 fun NavRow(title: String, onClick: () -> Unit, subtitle: String? = null, icon: ImageVector? = null) {
-    RowShell(icon, title, subtitle, Modifier.clickable(role = Role.Button, onClick = onClick)) {
+    val source = remember { MutableInteractionSource() }
+    RowShell(
+        icon, title, subtitle,
+        Modifier
+            .sakugaPressEffect(
+                interactionSource = source,
+                role = SakugaAnimationController.ComponentRole.CARD,
+                enableParticles = false,
+                enableTouchRipple = false,
+            )
+            .clickable(
+                interactionSource = source,
+                indication = androidx.compose.material3.ripple(bounded = true),
+                role = Role.Button,
+                onClick = onClick,
+            ),
+    ) {
         Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
 fun ActionRow(title: String, onClick: () -> Unit, subtitle: String? = null, icon: ImageVector? = null, destructive: Boolean = false) {
-    RowShell(icon, title, subtitle, Modifier.clickable(role = Role.Button, onClick = onClick)) {
+    val source = remember { MutableInteractionSource() }
+    RowShell(
+        icon, title, subtitle,
+        Modifier
+            .sakugaPressEffect(
+                interactionSource = source,
+                role = SakugaAnimationController.ComponentRole.CARD,
+                particlePreset = if (destructive) SakugaParticlePreset.DELETE else SakugaParticlePreset.SUBTLE,
+                enableParticles = destructive,
+                enableTouchRipple = false,
+            )
+            .clickable(
+                interactionSource = source,
+                indication = androidx.compose.material3.ripple(bounded = true),
+                role = Role.Button,
+                onClick = onClick,
+            ),
+    ) {
         if (destructive) Box(Modifier.size(0.dp))
     }
 }
@@ -92,7 +144,24 @@ fun ActionRow(title: String, onClick: () -> Unit, subtitle: String? = null, icon
 @Composable
 fun <T> ChoiceRow(title: String, options: List<T>, selected: T, label: (T) -> String, onSelect: (T) -> Unit, icon: ImageVector? = null, enabled: Boolean = true) {
     var open by remember { mutableStateOf(false) }
-    RowShell(icon, title, label(selected), Modifier.clickable(enabled = enabled, role = Role.Button) { open = true })
+    val source = remember { MutableInteractionSource() }
+    RowShell(
+        icon, title, label(selected),
+        Modifier
+            .sakugaPressEffect(
+                interactionSource = source,
+                enabled = enabled,
+                role = SakugaAnimationController.ComponentRole.CARD,
+                enableParticles = false,
+                enableTouchRipple = false,
+            )
+            .clickable(
+                enabled = enabled,
+                interactionSource = source,
+                indication = androidx.compose.material3.ripple(bounded = true),
+                role = Role.Button,
+            ) { open = true },
+    )
     if (open) ChoiceDialog(title, options, selected, label, { open = false }, onSelect)
 }
 
@@ -100,7 +169,7 @@ fun <T> ChoiceRow(title: String, options: List<T>, selected: T, label: (T) -> St
 fun SliderRow(title: String, valueLabel: String, value: Float, range: ClosedFloatingPointRange<Float>, steps: Int, onChange: (Float) -> Unit, icon: ImageVector? = null) {
     Column(Modifier.padding(bottom = 6.dp)) {
         RowShell(icon, title, valueLabel)
-        Slider(value, onChange, Modifier.padding(horizontal = 20.dp), valueRange = range, steps = steps)
+        SakugaSlider(value, onChange, Modifier.padding(horizontal = 20.dp), valueRange = range, steps = steps)
     }
 }
 

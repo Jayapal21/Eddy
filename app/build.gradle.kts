@@ -8,15 +8,13 @@ plugins {
 
 android {
     namespace = "app.eddy.browser"
-    buildToolsVersion = "37.0.0"
-    compileSdk {
-        version = release(37) { minorApiLevel = 2 }
-    }
+    buildToolsVersion = "36.0.0"
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "app.eddy.browser"
         minSdk = 29
-        targetSdk = 37
+        targetSdk = 36
         versionCode = 46
         versionName = "0.6.36-beta"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -35,9 +33,21 @@ android {
         }
     }
 
+    signingConfigs {
+        create("debugConfig") {
+            storeFile = file("${rootDir}/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         // Debug builds use Android's debug key, so they get their own package instead of replacing the release install.
-        debug { applicationIdSuffix = ".debug" }
+        debug {
+            applicationIdSuffix = ".debug"
+            signingConfig = signingConfigs.getByName("debugConfig")
+        }
         release {
             signingConfigs.findByName("release")?.let { signingConfig = it }
             isMinifyEnabled = true
@@ -75,6 +85,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.dynamicanimation)
     implementation(libs.androidx.graphics.shapes)
     implementation(libs.androidx.webkit)
     implementation(libs.androidx.room.runtime)

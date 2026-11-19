@@ -2,7 +2,10 @@ package app.eddy.browser.browser
 
 import app.eddy.browser.R
 import app.eddy.browser.util.str
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,29 +23,39 @@ import androidx.compose.material.icons.rounded.GppBad
 import androidx.compose.material.icons.rounded.NoEncryption
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.WifiOff
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.eddy.browser.ui.animation.entrance
 import app.eddy.browser.ui.components.ConfirmDialog
+import app.eddy.browser.ui.sakuga.SakugaButton
+import app.eddy.browser.ui.sakuga.SakugaEffectType
+import app.eddy.browser.ui.sakuga.SakugaOutlinedButton
+import app.eddy.browser.ui.sakuga.SakugaPhysics
+import app.eddy.browser.ui.sakuga.SakugaTextButton
+import app.eddy.browser.ui.sakuga.rememberSakugaColors
+import app.eddy.browser.ui.sakuga.rememberSakugaController
+import app.eddy.browser.ui.sakuga.sakugaOverlay
+import app.eddy.browser.ui.sakuga.sakugaPressSquash
 import app.eddy.browser.ui.theme.Dimens
+import app.eddy.browser.ui.theme.LocalReducedMotion
 import app.eddy.browser.util.UrlUtils
 
 /** Native replacement for WebView's own error pages, with a matching action for each failure. */
@@ -85,11 +98,31 @@ fun ErrorPage(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            val reduced = LocalReducedMotion.current
+            val sakugaColors = rememberSakugaColors()
+            val badgeController = rememberSakugaController()
+            val badgeSource = remember { MutableInteractionSource() }
+            val badgePop = remember { Animatable(1f) }
+            var badgeTaps by remember { mutableIntStateOf(0) }
+            LaunchedEffect(badgeTaps) {
+                if (badgeTaps > 0 && !reduced) {
+                    badgePop.snapTo(1.16f)
+                    badgePop.animateTo(1f, SakugaPhysics.overshootSpring(false))
+                }
+            }
             Box(
-                Modifier.entrance(0).size(112.dp).background(
-                    if (warn) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
-                    if (warn) MaterialShapes.SoftBurst.toShape() else MaterialShapes.Cookie9Sided.toShape(),
-                ),
+                Modifier.entrance(0).size(112.dp)
+                    .graphicsLayer { scaleX = badgePop.value; scaleY = badgePop.value }
+                    .sakugaPressSquash(badgeSource, 1.10f, 0.88f)
+                    .sakugaOverlay(badgeController)
+                    .background(
+                        if (warn) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
+                        if (warn) MaterialShapes.SoftBurst.toShape() else MaterialShapes.Cookie9Sided.toShape(),
+                    )
+                    .clickable(interactionSource = badgeSource, indication = null) {
+                        badgeTaps++
+                        badgeController.emitCenter(SakugaEffectType.CRYSTAL_BURST, sakugaColors, intensity = 0.9f)
+                    },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -101,25 +134,25 @@ fun ErrorPage(
             Text(message, Modifier.entrance(2), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
             Text(error.url, Modifier.entrance(2), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline, textAlign = TextAlign.Center, maxLines = 2)
             if (isInsecure) {
-                Button(onClick = onRetry, Modifier.entrance(3)) { Text(str(R.string.try_again)) }
-                OutlinedButton(onClick = onBack, Modifier.entrance(3)) { Text(str(R.string.go_back)) }
-                TextButton(
+                SakugaButton(onClick = onRetry, Modifier.entrance(3)) { Text(str(R.string.try_again)) }
+                SakugaOutlinedButton(onClick = onBack, Modifier.entrance(3)) { Text(str(R.string.go_back)) }
+                SakugaTextButton(
                     onClick = { confirmInsecure = true }, Modifier.entrance(3),
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
                 ) { Text(str(R.string.continue_without_https)) }
             } else if (isBlocked) {
-                Button(onClick = onBack, Modifier.entrance(3)) { Text(str(R.string.go_back)) }
-                TextButton(onClick = onRetry, Modifier.entrance(3)) { Text(str(R.string.open_anyway)) }
+                SakugaButton(onClick = onBack, Modifier.entrance(3)) { Text(str(R.string.go_back)) }
+                SakugaTextButton(onClick = onRetry, Modifier.entrance(3)) { Text(str(R.string.open_anyway)) }
             } else if (isSsl) {
-                Button(onClick = onBack, Modifier.entrance(3)) { Text(str(R.string.back_to_safety)) }
+                SakugaButton(onClick = onBack, Modifier.entrance(3)) { Text(str(R.string.back_to_safety)) }
                 if (error.sslHandler != null) {
-                    TextButton(onClick = { confirmProceed = true }, Modifier.entrance(3), colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
+                    SakugaTextButton(onClick = { confirmProceed = true }, Modifier.entrance(3), colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
                         Text(str(R.string.proceed_anyway_unsafe))
                     }
                 }
             } else {
-                Button(onClick = onRetry, Modifier.entrance(3)) { Text(str(R.string.try_again)) }
-                OutlinedButton(onClick = onBack, Modifier.entrance(3)) { Text(str(R.string.go_back)) }
+                SakugaButton(onClick = onRetry, Modifier.entrance(3)) { Text(str(R.string.try_again)) }
+                SakugaOutlinedButton(onClick = onBack, Modifier.entrance(3)) { Text(str(R.string.go_back)) }
             }
         }
     }

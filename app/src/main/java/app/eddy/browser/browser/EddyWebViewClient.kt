@@ -150,7 +150,7 @@ class EddyWebViewClient(
         tab.progress = 5
         tab.error?.sslHandler?.cancel()
         tab.error = null
-        if (newPage) { tab.blockedRaw = 0; tab.blockedCount = 0 }
+        if (newPage) { tab.blockedRaw = 0; tab.blockedCount = 0; tab.readerAvailable = false }
         tab.security = securityFor(url)
         tab.favicon = host.favicons.peek(UrlUtils.displayHost(url))
         syncNav(view)
@@ -170,15 +170,43 @@ class EddyWebViewClient(
         // The panel lives in the page, so a navigation wipes it; put it back where the user left it on.
         if (tab.devToolsActive) DevTools.show(view.context, view)
         // Reader mode rewrites the document, so a navigation wipes it too.
-        if (tab.readerActive) ReaderMode.show(view.context, view) { ok -> if (!ok) tab.readerActive = false }
+        if (tab.readerActive) {
+            ReaderMode.show(
+                context = view.context,
+                view = view,
+                theme = host.settings.readerTheme,
+                reducedMotion = ReaderMode.isReducedMotion(view.context, host.settings),
+            ) { ok ->
+                tab.readerActive = ok
+                tab.readerAvailable = ok
+            }
+        } else if (tab.error == null) {
+            val checkedUrl = url
+            ReaderMode.checkAvailability(view.context, view, checkedUrl) { available ->
+                if (tab.url == checkedUrl && tab.error == null) {
+                    tab.readerAvailable = available
+                }
+            }
+        }
         if (tab.error == null) host.onPageFinished(tab)
     }
 
     override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
         if (url.startsWith(ERROR_SCHEME)) return
+        val changed = tab.url != url
         tab.url = url
         if (tab.error == null) tab.security = securityFor(url)
         syncNav(view)
+        if (changed && !isReload && !tab.isLoading && !tab.readerActive && tab.error == null) {
+            tab.readerAvailable = false
+            view.postDelayed({
+                if (tab.url == url && !tab.isLoading && tab.error == null && !tab.readerActive) {
+                    ReaderMode.checkAvailability(view.context, view, url) { available ->
+                        if (tab.url == url && tab.error == null) tab.readerAvailable = available
+                    }
+                }
+            }, 450)
+        }
     }
 
     override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
@@ -202,6 +230,8 @@ class EddyWebViewClient(
         )
         tab.url = url
         tab.isLoading = false
+        tab.readerAvailable = false
+        tab.readerActive = false
         tab.security = if (kind == ErrorKind.SSL) Security.ERROR else securityFor(url)
     }
 

@@ -17,7 +17,7 @@ import java.io.File
  * tabs are also persisted so previews survive process death without keeping every WebView alive.
  */
 class TabThumbnailManager(context: Context, private val scope: CoroutineScope) {
-    private val dir = File(context.filesDir, "thumbs").apply { mkdirs() }
+    private val dir by lazy { File(context.filesDir, "thumbs").apply { mkdirs() } }
     /** Bumped by [clear]; a capture taken before it is not written afterwards. */
     @Volatile private var generation = 0
     /** One file operation at a time, so a clear cannot interleave with a write still in flight. */

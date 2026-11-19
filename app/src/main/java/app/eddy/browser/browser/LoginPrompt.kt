@@ -21,12 +21,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,6 +38,9 @@ import androidx.compose.ui.unit.dp
 import app.eddy.browser.ui.animation.effectSpring
 import app.eddy.browser.ui.animation.spatialSpring
 import app.eddy.browser.ui.components.EddyIconButton
+import app.eddy.browser.ui.sakuga.SakugaButton
+import app.eddy.browser.ui.sakuga.SakugaCard
+import app.eddy.browser.ui.sakuga.SakugaTextButton
 import app.eddy.browser.util.UrlUtils
 
 /** Card that asks whether to save or update the login the user just submitted. */
@@ -90,9 +91,9 @@ private fun SaveLoginCard(prompt: SaveLoginPrompt, vm: BrowserViewModel) {
                 )
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = vm::neverSaveLogin) { Text(str(R.string.never)) }
-                TextButton(onClick = vm::dismissSaveLogin) { Text(str(R.string.not_now)) }
-                Button(onClick = vm::confirmSaveLogin) { Text(if (update) str(R.string.update) else str(R.string.save)) }
+                SakugaTextButton(onClick = vm::neverSaveLogin) { Text(str(R.string.never)) }
+                SakugaTextButton(onClick = vm::dismissSaveLogin) { Text(str(R.string.not_now)) }
+                SakugaButton(onClick = vm::confirmSaveLogin) { Text(if (update) str(R.string.update) else str(R.string.save)) }
             }
         }
     }
@@ -125,8 +126,9 @@ fun AutofillLayer(vm: BrowserViewModel, tab: BrowserTab?, keyboardVisible: Boole
                         )
                     }
                     items(offer.logins, key = { it.id }) { login ->
-                        Surface(
+                        SakugaCard(
                             onClick = { vm.fillLogin(offer, login) },
+                            burstOnClick = true,
                             shape = CircleShape,
                             color = MaterialTheme.colorScheme.primaryContainer,
                             contentColor = MaterialTheme.colorScheme.onPrimaryContainer,

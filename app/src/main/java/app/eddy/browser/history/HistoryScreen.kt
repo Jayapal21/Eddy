@@ -5,8 +5,10 @@ import app.eddy.browser.util.str
 import android.content.ClipData
 import android.content.ClipboardManager
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -51,6 +53,9 @@ import app.eddy.browser.ui.components.ScreenScaffold
 import app.eddy.browser.ui.components.SearchField
 import app.eddy.browser.ui.components.SiteIcon
 import app.eddy.browser.ui.components.EddyIconButton
+import app.eddy.browser.ui.sakuga.SakugaAnimationController
+import app.eddy.browser.ui.sakuga.SakugaParticlePreset
+import app.eddy.browser.ui.sakuga.sakugaPressEffect
 import app.eddy.browser.ui.theme.Dimens
 import java.time.Instant
 import java.time.LocalDate
@@ -129,10 +134,16 @@ private fun HistoryRow(vm: BrowserViewModel, entry: HistoryEntry) {
     val context = LocalContext.current
     var menu by remember { mutableStateOf(false) }
     val time = remember(entry.visitTime) { DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).format(Instant.ofEpochMilli(entry.visitTime).atZone(ZoneId.systemDefault())) }
+    val source = remember { MutableInteractionSource() }
     Box {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 64.dp)
-                .combinedClickable(role = Role.Button, onClickLabel = str(R.string.open), onLongClickLabel = str(R.string.more_actions), onClick = { vm.navigate(entry.url) }, onLongClick = { haptics.longPress(); menu = true })
+                .sakugaPressEffect(
+                    interactionSource = source,
+                    role = SakugaAnimationController.ComponentRole.CARD,
+                    enableParticles = false,
+                )
+                .combinedClickable(interactionSource = source, indication = LocalIndication.current, role = Role.Button, onClickLabel = str(R.string.open), onLongClickLabel = str(R.string.more_actions), onClick = { vm.navigate(entry.url) }, onLongClick = { haptics.longPress(); menu = true })
                 .padding(horizontal = Dimens.gutter, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -141,7 +152,7 @@ private fun HistoryRow(vm: BrowserViewModel, entry: HistoryEntry) {
                 Text(entry.title.ifBlank { entry.host }, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("${entry.host} · $time", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             }
-            EddyIconButton(Icons.Rounded.Delete, str(R.string.delete, entry.title.ifBlank { entry.host }), { vm.history.delete(entry.id) }, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            EddyIconButton(Icons.Rounded.Delete, str(R.string.delete, entry.title.ifBlank { entry.host }), { vm.history.delete(entry.id) }, tint = MaterialTheme.colorScheme.onSurfaceVariant, particlePreset = SakugaParticlePreset.DELETE)
         }
         DropdownMenu(menu, { menu = false }) {
             DropdownMenuItem(text = { Text(str(R.string.open_in_new_tab)) }, leadingIcon = { Icon(Icons.AutoMirrored.Rounded.OpenInNew, null) }, onClick = { menu = false; vm.openInNewTab(entry.url) })

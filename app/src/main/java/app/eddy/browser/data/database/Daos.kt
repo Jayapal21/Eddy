@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
@@ -45,6 +46,12 @@ interface HistoryDao {
             "GROUP BY host ORDER BY lastVisit DESC LIMIT :limit",
     )
     fun recentSites(limit: Int): Flow<List<SiteVisit>>
+
+    @Query(
+        "SELECT url, title, host, COUNT(*) AS visits, MAX(visitTime) AS lastVisit FROM history " +
+            "GROUP BY host ORDER BY lastVisit DESC LIMIT :limit",
+    )
+    fun siteStats(limit: Int): Flow<List<SiteVisit>>
 
     @Query("DELETE FROM history WHERE id = :id")
     suspend fun delete(id: Long)
@@ -182,4 +189,50 @@ interface LoginDao {
 
     @Query("DELETE FROM login_blocklist")
     suspend fun clearBlocklist()
+}
+
+@Dao
+interface SavedArticleDao {
+    @Query("SELECT * FROM saved_articles ORDER BY savedAt DESC")
+    fun all(): Flow<List<SavedArticle>>
+
+    @Query("SELECT COUNT(*) > 0 FROM saved_articles WHERE url = :url")
+    fun isSaved(url: String): Flow<Boolean>
+
+    @Query("SELECT * FROM saved_articles WHERE url = :url LIMIT 1")
+    suspend fun findByUrl(url: String): SavedArticle?
+
+    @Query("SELECT * FROM saved_articles WHERE id = :id LIMIT 1")
+    suspend fun get(id: Long): SavedArticle?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertArticle(article: SavedArticle): Long
+
+    @Query("DELETE FROM saved_articles WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM saved_articles WHERE url = :url")
+    suspend fun deleteByUrl(url: String)
+
+    @Query("DELETE FROM saved_articles")
+    suspend fun clear()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertImages(images: List<SavedArticleImage>)
+
+    @Query("SELECT id FROM saved_article_images WHERE articleId = :articleId ORDER BY id")
+    suspend fun imageIdsForArticle(articleId: Long): List<Long>
+
+    @Query("SELECT * FROM saved_article_images WHERE id = :id LIMIT 1")
+    suspend fun getImage(id: Long): SavedArticleImage?
+
+    @Transaction
+    suspend fun saveWithImages(article: SavedArticle, images: List<SavedArticleImage>): Long {
+        deleteByUrl(article.url)
+        val id = insertArticle(article)
+        if (images.isNotEmpty()) {
+            insertImages(images.map { it.copy(articleId = id) })
+        }
+        return id
+    }
 }

@@ -35,13 +35,10 @@ import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Videocam
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -61,6 +58,11 @@ import app.eddy.browser.data.database.DownloadStatus
 import app.eddy.browser.ui.components.EmptyState
 import app.eddy.browser.ui.components.ScreenScaffold
 import app.eddy.browser.ui.components.EddyIconButton
+import app.eddy.browser.ui.sakuga.SakugaAlertDialog
+import app.eddy.browser.ui.sakuga.SakugaIndeterminateLinearProgress
+import app.eddy.browser.ui.sakuga.SakugaLinearProgress
+import app.eddy.browser.ui.sakuga.SakugaParticlePreset
+import app.eddy.browser.ui.sakuga.SakugaTextButton
 import app.eddy.browser.ui.theme.Dimens
 
 @Composable
@@ -70,7 +72,7 @@ fun DownloadsScreen(vm: BrowserViewModel) {
     ScreenScaffold(
         str(R.string.downloads), onBack = { vm.screen = Screen.BROWSER },
         actions = {
-            EddyIconButton(Icons.Rounded.DeleteSweep, str(R.string.clear_finished_downloads), { vm.downloads.clearFinished() }, enabled = items.any { it.status in FINISHED })
+            EddyIconButton(Icons.Rounded.DeleteSweep, str(R.string.clear_finished_downloads), { vm.downloads.clearFinished() }, enabled = items.any { it.status in FINISHED }, particlePreset = SakugaParticlePreset.DELETE)
         },
     ) { padding ->
         if (items.isEmpty()) {
@@ -127,8 +129,8 @@ private fun DownloadCard(vm: BrowserViewModel, d: DownloadEntity, progress: Live
                 }
             }
             if (d.status == DownloadStatus.RUNNING || d.status == DownloadStatus.PAUSED || d.status == DownloadStatus.QUEUED) {
-                if (total > 0) LinearProgressIndicator(progress = { (downloaded.toFloat() / total).coerceIn(0f, 1f) }, Modifier.fillMaxWidth())
-                else if (running) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (total > 0) SakugaLinearProgress(progress = { (downloaded.toFloat() / total).coerceIn(0f, 1f) }, Modifier.fillMaxWidth())
+                else if (running) SakugaIndeterminateLinearProgress(Modifier.fillMaxWidth())
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                 // Only web links: data: and blob: URLs are useless (or huge) outside the page that made them.
@@ -150,21 +152,21 @@ private fun DownloadCard(vm: BrowserViewModel, d: DownloadEntity, progress: Live
                     }
                     DownloadStatus.COMPLETED -> EddyIconButton(Icons.AutoMirrored.Rounded.OpenInNew, str(R.string.open_2, d.fileName), { vm.openFile(d.contentUri, d.mimeType, d.fileName) })
                 }
-                if (!running) EddyIconButton(Icons.Rounded.Delete, str(R.string.delete, d.fileName), { if (d.status == DownloadStatus.COMPLETED) confirmDelete = true else vm.downloads.delete(d.id, false) })
+                if (!running) EddyIconButton(Icons.Rounded.Delete, str(R.string.delete, d.fileName), { if (d.status == DownloadStatus.COMPLETED) confirmDelete = true else vm.downloads.delete(d.id, false) }, particlePreset = SakugaParticlePreset.DELETE)
             }
         }
     }
 
     if (confirmDelete) {
-        AlertDialog(
+        SakugaAlertDialog(
             onDismissRequest = { confirmDelete = false },
             title = { Text(str(R.string.delete_2, d.fileName)) },
             text = { Text(str(R.string.remove_the_entry_from_this_list_or_delet)) },
-            confirmButton = { TextButton(onClick = { confirmDelete = false; vm.downloads.delete(d.id, true) }) { Text(str(R.string.delete_file)) } },
+            confirmButton = { SakugaTextButton(onClick = { confirmDelete = false; vm.downloads.delete(d.id, true) }, burstOnClick = true, particlePreset = SakugaParticlePreset.DELETE) { Text(str(R.string.delete_file)) } },
             dismissButton = {
                 Row {
-                    TextButton(onClick = { confirmDelete = false }) { Text(str(R.string.cancel)) }
-                    TextButton(onClick = { confirmDelete = false; vm.downloads.delete(d.id, false) }) { Text(str(R.string.remove_entry)) }
+                    SakugaTextButton(onClick = { confirmDelete = false }) { Text(str(R.string.cancel)) }
+                    SakugaTextButton(onClick = { confirmDelete = false; vm.downloads.delete(d.id, false) }) { Text(str(R.string.remove_entry)) }
                 }
             },
         )

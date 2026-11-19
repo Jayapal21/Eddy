@@ -27,14 +27,19 @@ fun <T> effectSpring(): FiniteAnimationSpec<T> =
 @Composable
 fun rememberSystemReducedMotion(): Boolean {
     val resolver = LocalContext.current.contentResolver
-    fun read() = Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+    fun read() = runCatching {
+        Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+    }.getOrDefault(false)
     val reduced = remember { mutableStateOf(read()) }
     DisposableEffect(resolver) {
         val observer = object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) { reduced.value = read() }
         }
-        resolver.registerContentObserver(Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE), false, observer)
-        onDispose { resolver.unregisterContentObserver(observer) }
+        runCatching {
+            val uri = Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE)
+            if (uri != null) resolver.registerContentObserver(uri, false, observer)
+        }
+        onDispose { runCatching { resolver.unregisterContentObserver(observer) } }
     }
     return reduced.value
 }

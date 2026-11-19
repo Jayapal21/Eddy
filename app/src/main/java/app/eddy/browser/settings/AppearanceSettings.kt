@@ -3,10 +3,13 @@ package app.eddy.browser.settings
 import app.eddy.browser.R
 import app.eddy.browser.util.str
 import android.os.Build
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.horizontalScroll
@@ -31,9 +34,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -43,9 +48,15 @@ import app.eddy.browser.data.models.MotionPref
 import app.eddy.browser.data.models.Settings
 import app.eddy.browser.data.models.ShortcutStyle
 import app.eddy.browser.data.models.ThemeMode
-import app.eddy.browser.data.models.ToolbarPosition
 import app.eddy.browser.ui.animation.rememberSystemReducedMotion
+import app.eddy.browser.ui.sakuga.SakugaEffectType
+import app.eddy.browser.ui.sakuga.SakugaPhysics
+import app.eddy.browser.ui.sakuga.rememberSakugaColors
+import app.eddy.browser.ui.sakuga.rememberSakugaController
+import app.eddy.browser.ui.sakuga.sakugaOverlay
+import app.eddy.browser.ui.sakuga.sakugaPressSquash
 import app.eddy.browser.ui.theme.Dimens
+import app.eddy.browser.ui.theme.LocalReducedMotion
 import app.eddy.browser.ui.theme.Palette
 
 @Composable
@@ -60,14 +71,26 @@ fun AppearanceSettings(vm: BrowserViewModel, s: Settings) {
             SwitchRow(str(R.string.dynamic_colors), s.dynamicColor, { v -> vm.launchSettings { it.copy(dynamicColor = v) } }, str(R.string.use_colors_from_your_wallpaper))
         }
         if (!dynamicAvailable || !s.dynamicColor) {
+            val reduced = LocalReducedMotion.current
+            val sakugaColors = rememberSakugaColors()
             GroupDivider()
             Row(Modifier.padding(horizontal = 20.dp, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Palette.entries.forEachIndexed { i, p ->
                     val selected = s.palette == i
+                    val controller = rememberSakugaController()
+                    val source = remember { MutableInteractionSource() }
+                    val scale by animateFloatAsState(if (selected && !reduced) 1.08f else 1f, SakugaPhysics.overshootSpring(reduced), label = "paletteSwatchScale")
                     Box(
-                        Modifier.size(Dimens.touchTarget).clip(CircleShape).background(p.swatch)
+                        Modifier.size(Dimens.touchTarget)
+                            .graphicsLayer { scaleX = scale; scaleY = scale }
+                            .sakugaPressSquash(source, SakugaPhysics.PRESS_ICON_SCALE_X, SakugaPhysics.PRESS_ICON_SCALE_Y)
+                            .sakugaOverlay(controller)
+                            .clip(CircleShape).background(p.swatch)
                             .border(if (selected) 3.dp else 0.dp, MaterialTheme.colorScheme.onSurface, CircleShape)
-                            .clickable { vm.launchSettings { it.copy(palette = i) } }
+                            .clickable(interactionSource = source, indication = LocalIndication.current, role = Role.RadioButton) {
+                                controller.emitCenter(SakugaEffectType.CRYSTAL_BURST, sakugaColors, intensity = 0.85f)
+                                vm.launchSettings { it.copy(palette = i) }
+                            }
                             .semantics { contentDescription = str(R.string.palette_description, p.label) + if (selected) str(R.string.selected_suffix) else "" },
                         contentAlignment = Alignment.Center,
                     ) { if (selected) Icon(Icons.Rounded.Check, null, tint = androidx.compose.ui.graphics.Color.White) }
@@ -79,8 +102,6 @@ fun AppearanceSettings(vm: BrowserViewModel, s: Settings) {
     SettingsFootnote(str(R.string.the_new_icon_appears_after_you_leave_edd))
     SettingsGroup(str(R.string.layout)) {
         NavRow(str(R.string.start_page), { vm.settingsStack.add(SettingsPage.START_PAGE) }, str(R.string.title_sections_shortcut_columns))
-        GroupDivider()
-        ChoiceRow(str(R.string.toolbar_position), ToolbarPosition.entries, s.toolbarPosition, { if (it == ToolbarPosition.BOTTOM) str(R.string.bottom) else str(R.string.top) }, { v -> vm.launchSettings { it.copy(toolbarPosition = v) } })
     }
     SettingsGroup(str(R.string.motion_and_feedback)) {
         // System "Remove animations" wins over this setting, so say so instead of showing "Full".
@@ -105,8 +126,6 @@ fun AppearanceSettings(vm: BrowserViewModel, s: Settings) {
 @Composable
 fun StartPageSettings(vm: BrowserViewModel, s: Settings) {
     SettingsGroup(str(R.string.sections)) {
-        SwitchRow(str(R.string.show_title), s.homeShowTitle, { v -> vm.launchSettings { it.copy(homeShowTitle = v) } })
-        GroupDivider()
         SwitchRow(str(R.string.search_box), s.homeShowSearch, { v -> vm.launchSettings { it.copy(homeShowSearch = v) } })
         GroupDivider()
         SwitchRow(str(R.string.shortcuts), s.homeShowShortcuts, { v -> vm.launchSettings { it.copy(homeShowShortcuts = v) } })
@@ -140,6 +159,8 @@ fun StartPageSettings(vm: BrowserViewModel, s: Settings) {
 @Composable
 private fun AppIconPicker() {
     val context = LocalContext.current
+    val reduced = LocalReducedMotion.current
+    val sakugaColors = rememberSakugaColors()
     var current by remember { mutableStateOf(AppIcon.current(context)) }
     Row(
         Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 14.dp),
@@ -148,11 +169,22 @@ private fun AppIconPicker() {
         AppIcon.entries.forEach { icon ->
             val selected = icon == current
             val shape = RoundedCornerShape(16.dp)
+            val controller = rememberSakugaController()
+            val source = remember { MutableInteractionSource() }
+            val popScale by animateFloatAsState(if (selected && !reduced) 1.07f else 1f, SakugaPhysics.overshootSpring(reduced), label = "appIconScale")
             Box(
                 // A 0.dp border still draws a hairline, which shows on the light Paper tile.
-                Modifier.size(56.dp).clip(shape).background(colorResource(icon.background))
+                Modifier.size(56.dp)
+                    .graphicsLayer { scaleX = popScale; scaleY = popScale }
+                    .sakugaPressSquash(source, SakugaPhysics.PRESS_ICON_SCALE_X, SakugaPhysics.PRESS_ICON_SCALE_Y)
+                    .sakugaOverlay(controller)
+                    .clip(shape).background(colorResource(icon.background))
                     .then(if (selected) Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, shape) else Modifier)
-                    .clickable { AppIcon.set(icon); current = icon }
+                    .clickable(interactionSource = source, indication = LocalIndication.current, role = Role.RadioButton) {
+                        controller.emitCenter(SakugaEffectType.CRYSTAL_BURST, sakugaColors, intensity = 0.85f)
+                        AppIcon.set(icon)
+                        current = icon
+                    }
                     .semantics { contentDescription = str(R.string.icon_description, icon.label) + if (selected) str(R.string.selected_suffix) else "" },
             ) {
                 // The foreground art sits inside the adaptive-icon safe zone; scale it to fill the tile.

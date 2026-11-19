@@ -18,12 +18,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -44,6 +42,13 @@ import app.eddy.browser.browser.BrowserViewModel
 import app.eddy.browser.data.models.SearchEngine
 import app.eddy.browser.ui.components.TextInputDialog
 import app.eddy.browser.ui.components.EddyIconButton
+import app.eddy.browser.ui.sakuga.SakugaAlertDialog
+import app.eddy.browser.ui.sakuga.SakugaAnimationController
+import app.eddy.browser.ui.sakuga.SakugaOutlinedTextField
+import app.eddy.browser.ui.sakuga.SakugaParticlePreset
+import app.eddy.browser.ui.sakuga.SakugaRadioButton
+import app.eddy.browser.ui.sakuga.SakugaTextButton
+import app.eddy.browser.ui.sakuga.sakugaPressEffect
 import java.util.UUID
 
 /** Default engine choice, SearXNG instance and custom URL-template engines. */
@@ -55,11 +60,21 @@ fun SearchSettings(vm: BrowserViewModel, s: app.eddy.browser.data.models.Setting
     SettingsGroup(str(R.string.default_search_engine)) {
         s.allEngines.forEachIndexed { i, engine ->
             if (i > 0) GroupDivider()
+            val source = remember { MutableInteractionSource() }
             Row(
-                Modifier.fillMaxWidth().heightIn(min = 60.dp).clickable(role = Role.RadioButton) { vm.launchSettings { it.copy(searchEngineId = engine.id) } }.padding(horizontal = 16.dp),
+                Modifier.fillMaxWidth().heightIn(min = 60.dp)
+                    .sakugaPressEffect(
+                        interactionSource = source,
+                        role = SakugaAnimationController.ComponentRole.CARD,
+                        enableParticles = false,
+                    )
+                    .clickable(interactionSource = source, indication = LocalIndication.current, role = Role.RadioButton) {
+                        vm.launchSettings { it.copy(searchEngineId = engine.id) }
+                    }
+                    .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                RadioButton(selected = s.searchEngineId == engine.id, onClick = null)
+                SakugaRadioButton(selected = s.searchEngineId == engine.id, onClick = null)
                 EngineLogo(engine.id, Modifier.padding(start = 16.dp))
                 Column(Modifier.weight(1f).padding(start = 16.dp)) {
                     Text(engine.name, style = MaterialTheme.typography.bodyLarge)
@@ -68,7 +83,7 @@ fun SearchSettings(vm: BrowserViewModel, s: app.eddy.browser.data.models.Setting
                 if (!engine.builtIn) {
                     EddyIconButton(Icons.Rounded.Delete, str(R.string.remove, engine.name), {
                         vm.launchSettings { it.copy(customEngines = it.customEngines.filterNot { c -> c.id == engine.id }, searchEngineId = if (it.searchEngineId == engine.id) "duckduckgo" else it.searchEngineId) }
-                    })
+                    }, particlePreset = SakugaParticlePreset.DELETE)
                 }
             }
         }
@@ -122,17 +137,17 @@ private fun AddEngineDialog(onDismiss: () -> Unit, onAdd: (SearchEngine) -> Unit
     var url by remember { mutableStateOf("https://") }
     var suggest by remember { mutableStateOf("") }
     val valid = name.isNotBlank() && url.startsWith("http") && "%s" in url && (suggest.isBlank() || "%s" in suggest)
-    AlertDialog(
+    SakugaAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(str(R.string.custom_search_engine)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.name)) }, singleLine = true)
-                OutlinedTextField(url, { url = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.search_url_with_s)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), isError = "%s" !in url)
-                OutlinedTextField(suggest, { suggest = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.suggestions_url_optional)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
+                SakugaOutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.name)) }, singleLine = true)
+                SakugaOutlinedTextField(url, { url = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.search_url_with_s)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), isError = "%s" !in url)
+                SakugaOutlinedTextField(suggest, { suggest = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.suggestions_url_optional)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
             }
         },
-        confirmButton = { TextButton(enabled = valid, onClick = { onAdd(SearchEngine("custom-" + UUID.randomUUID(), name.trim(), url.trim(), suggest.trim().ifBlank { null })) }) { Text(str(R.string.add)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
+        confirmButton = { SakugaTextButton(enabled = valid, burstOnClick = true, onClick = { onAdd(SearchEngine("custom-" + UUID.randomUUID(), name.trim(), url.trim(), suggest.trim().ifBlank { null })) }) { Text(str(R.string.add)) } },
+        dismissButton = { SakugaTextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
     )
 }

@@ -738,4 +738,34 @@ Each site, search engine and list host you contact can see your IP address and t
     <string name="move_to_folder">Move to folder</string>
     <string name="move_tab_to_folder">Move %1$s to a folder</string>
     <string name="close_folder_tabs">Close all tabs in %1$s?</string>
+    <string name="enter_reader_mode">Enter Reader Mode</string>
+    <string name="exit_reader_mode">Exit Reader Mode</string>
+    <string name="home">Home</string>
+    <string name="reader_theme_dark">Dark</string>
+    <string name="reader_theme_light">Light</string>
+    <string name="switch_to_light_reader_theme">Switch to light reading theme</string>
+    <string name="switch_to_dark_reader_theme">Switch to dark reading theme</string>
+    <string name="listen">Listen</string>
+    <string name="pause_reading">Pause reading</string>
+    <string name="resume_reading">Resume reading</string>
+    <string name="stop_reading">Stop reading</string>
+    <string name="tts_paused">Paused</string>
+    <string name="reader_menu">Reader Mode menu</string>
+    <string name="offline_save">Offline save</string>
+    <string name="saving_offline">Saving offline…</string>
+    <string name="saved_offline_remove">Saved offline · Remove</string>
+    <string name="saved_for_offline_reading">Saved offline (%1$d images cached)</string>
+    <string name="removed_from_offline_reading">Removed from saved articles</string>
+    <string name="could_not_save_article_offline">Could not save article offline</string>
+    <string name="saved_articles">Saved articles</string>
+    <string name="saved_articles_count">Saved articles (%1$d)</string>
+    <string name="search_saved_articles">Search saved articles</string>
+    <string name="no_saved_articles">No saved articles yet</string>
+    <string name="tap_offline_save_in_reader_mode">Open an article in Reader Mode and choose Offline save to read it anywhere without internet.</string>
+    <string name="delete_saved_article">Remove saved article?</string>
+    <string name="clear_saved_articles">Clear all saved articles?</string>
+    <plurals name="cached_image_count">
+        <item quantity="one">%d image</item>
+        <item quantity="other">%d images</item>
+    </plurals>
 </resources>

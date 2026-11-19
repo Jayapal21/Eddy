@@ -11,9 +11,14 @@ object Dimens {
     val gutterLarge: Dp = 24.dp
 
     val omniboxHeight: Dp = 52.dp
-    val omniboxHeightCompact: Dp = 32.dp
+    val omniboxHeightCompact: Dp = 34.dp
+    val coinSize: Dp = 42.dp
+    val urlCapsuleHeight: Dp = 44.dp
     val toolbarHeight: Dp = 52.dp
     val chromeGap: Dp = 6.dp
+    val headerHorizontalPadding: Dp = 12.dp
+    val headerVerticalPadding: Dp = 8.dp
+    val headerElementGap: Dp = 4.dp
     /** Space the web page must reserve while the chrome is fully expanded. */
     val chromeExpanded: Dp = omniboxHeight + toolbarHeight + chromeGap * 3
     val chromeCollapsed: Dp = omniboxHeightCompact + chromeGap * 2

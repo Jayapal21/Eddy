@@ -11,12 +11,19 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -33,7 +40,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -42,6 +51,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.unit.dp
 import app.eddy.browser.ui.animation.rememberHaptics
+import app.eddy.browser.ui.sakuga.SakugaEffectType
+import app.eddy.browser.ui.sakuga.SakugaPhysics
+import app.eddy.browser.ui.sakuga.rememberSakugaColors
+import app.eddy.browser.ui.sakuga.rememberSakugaController
+import app.eddy.browser.ui.sakuga.sakugaOverlay
+import app.eddy.browser.ui.sakuga.sakugaPressSquash
 import app.eddy.browser.ui.theme.LocalReducedMotion
 import app.eddy.browser.ui.theme.Dimens
 import kotlinx.coroutines.delay
@@ -146,16 +161,36 @@ fun VoiceInputButton(onText: (String) -> Unit, state: VoiceState = rememberVoice
     // Keyed on the request, not Unit: the editor may already be open when the widget's mic asks again.
     LaunchedEffect(autoStart) { if (autoStart) { onAutoStarted(); if (!state.listening) toggle() } }
 
+    val reduced = LocalReducedMotion.current
     val held = MaterialTheme.colorScheme.primary
-    // The trace beside the omnibox carries the feedback; the button only needs to read as pressed.
-    val fill by animateFloatAsState(if (state.listening) 1f else 0f, spring(dampingRatio = 0.7f), label = "voiceFill")
+    val controller = rememberSakugaController()
+    val sakugaColors = rememberSakugaColors()
+    val source = remember { MutableInteractionSource() }
+    val fill by animateFloatAsState(
+        if (state.listening) 1f else 0f,
+        if (reduced) tween(0) else spring(dampingRatio = 0.72f),
+        label = "voiceFill",
+    )
+    val listeningScale by animateFloatAsState(
+        targetValue = if (state.listening && !reduced) 1.08f else 1f,
+        animationSpec = SakugaPhysics.overshootSpring(reduced),
+        label = "voiceScale",
+    )
 
     Box(
         modifier
             .sizeIn(minWidth = Dimens.touchTarget, minHeight = Dimens.touchTarget)
+            .sakugaOverlay(controller)
+            .sakugaPressSquash(
+                interactionSource = source,
+                pressX = SakugaPhysics.PRESS_ICON_SCALE_X,
+                pressY = SakugaPhysics.PRESS_ICON_SCALE_Y,
+            )
+            .scale(listeningScale)
+            .clip(CircleShape)
             .drawBehind {
                 if (fill <= 0f) return@drawBehind
-                val d = size.minDimension * 0.86f * fill
+                val d = size.minDimension * 0.82f * fill
                 drawRoundRect(
                     held,
                     topLeft = Offset((size.width - d) / 2f, (size.height - d) / 2f),
@@ -164,15 +199,25 @@ fun VoiceInputButton(onText: (String) -> Unit, state: VoiceState = rememberVoice
                 )
             }
             .clickable(
+                interactionSource = source,
+                indication = androidx.compose.material3.ripple(bounded = true),
                 role = Role.Button,
                 onClickLabel = if (state.listening) str(R.string.stop_dictation) else str(R.string.start_dictation),
-            ) { toggle() },
+            ) {
+                controller.emitCenter(
+                    if (state.listening) SakugaEffectType.SUBTLE_POP else SakugaEffectType.CLOUD_BURST,
+                    sakugaColors,
+                    intensity = 0.85f,
+                )
+                toggle()
+            },
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            Icons.Rounded.Mic,
+            if (state.listening) Icons.Rounded.Mic else Icons.Outlined.Mic,
             if (state.listening) str(R.string.listening_tap_to_stop) else str(R.string.dictate),
-            tint = if (state.listening) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.size(20.dp),
+            tint = if (state.listening) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

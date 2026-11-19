@@ -47,7 +47,7 @@ class WebViewFactory(private val appContext: Context, private val host: BrowserH
         }
     }
     private val mainExecutor by lazy { java.util.concurrent.Executor { Handler(Looper.getMainLooper()).post(it) } }
-    private val connectivity = appContext.getSystemService(ConnectivityManager::class.java)
+    private val connectivity by lazy { appContext.getSystemService(ConnectivityManager::class.java) }
     private val certificateExceptions = mutableSetOf<String>()
     private var sslPreferencesCleared = false
 
@@ -68,19 +68,20 @@ class WebViewFactory(private val appContext: Context, private val host: BrowserH
 
     /** Password capture, autofill and blob downloads need message channels and start-up scripts (newer WebView only). */
     val pageBridgeSupported: Boolean
-        get() = WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) &&
-            WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)
+        get() = isPageBridgeSupported
 
     val incognitoIsolated: Boolean
-        get() = WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)
+        get() = isIncognitoIsolated
 
-    fun isOnline(): Boolean {
-        val caps = connectivity.getNetworkCapabilities(connectivity.activeNetwork) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-    }
+    fun isOnline(): Boolean = runCatching {
+        val cm = connectivity ?: return@runCatching false
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return@runCatching false
+        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }.getOrDefault(true)
 
     @SuppressLint("SetJavaScriptEnabled", "RequiresFeature")
     fun create(tab: BrowserTab): EddyWebView {
+        host.blocker.ensureLoaded(host.settings.filterLists)
         val view = EddyWebView(MutableContextWrapper(activity ?: appContext))
         view.incognito = tab.incognito
         if (tab.incognito && incognitoIsolated) WebViewCompat.setProfile(view, incognitoProfile)
@@ -362,6 +363,11 @@ class WebViewFactory(private val appContext: Context, private val host: BrowserH
 
     companion object {
         const val PROFILE_PREFIX = "eddy_incognito"
+        val isPageBridgeSupported: Boolean
+            get() = WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) &&
+                WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)
+        val isIncognitoIsolated: Boolean
+            get() = WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)
         private fun newProfileName() = PROFILE_PREFIX + "_" + java.util.UUID.randomUUID().toString().take(8)
         /** Rewrites viewport meta tags while the document parses, then stops watching. */
         private const val DESKTOP_VIEWPORT_SCRIPT =

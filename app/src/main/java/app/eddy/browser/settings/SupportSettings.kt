@@ -10,9 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,6 +23,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.eddy.browser.BuildConfig
+import app.eddy.browser.ui.sakuga.SakugaButton
+import app.eddy.browser.ui.sakuga.SakugaOutlinedTextField
 import app.eddy.browser.ui.theme.Dimens
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -46,6 +46,7 @@ fun SupportSettings() {
     var email by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
+    var sentOk by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
     val emailOk = email.isBlank() || Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()
 
@@ -56,10 +57,12 @@ fun SupportSettings() {
             return
         }
         sending = true
+        sentOk = false
         status = null
         scope.launch {
             val ok = submit(email.trim(), message.trim())
             sending = false
+            sentOk = ok
             if (ok) {
                 prefs.edit().putLong("last_sent", System.currentTimeMillis()).apply()
                 message = ""
@@ -75,16 +78,21 @@ fun SupportSettings() {
             str(R.string.report_a_bug_ask_a_question_or_suggest_a),
             style = MaterialTheme.typography.bodyMedium,
         )
-        OutlinedTextField(
-            email, { email = it }, Modifier.fillMaxWidth().padding(top = 16.dp),
+        SakugaOutlinedTextField(
+            email, { email = it; sentOk = false }, Modifier.fillMaxWidth().padding(top = 16.dp),
             label = { Text(str(R.string.email_optional)) }, singleLine = true, isError = !emailOk,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
         )
-        OutlinedTextField(
-            message, { message = it.take(MAX_MESSAGE) }, Modifier.fillMaxWidth().heightIn(min = 160.dp).padding(top = 12.dp),
+        SakugaOutlinedTextField(
+            message, { message = it.take(MAX_MESSAGE); sentOk = false }, Modifier.fillMaxWidth().heightIn(min = 160.dp).padding(top = 12.dp),
             label = { Text(str(R.string.message)) },
         )
-        Button(::send, Modifier.padding(top = 16.dp), enabled = !sending && emailOk && message.isNotBlank()) {
+        SakugaButton(
+            onClick = ::send,
+            modifier = Modifier.padding(top = 16.dp),
+            enabled = !sending && emailOk && message.isNotBlank(),
+            successConfirmed = sentOk,
+        ) {
             Text(if (sending) "Sending…" else str(R.string.send))
         }
         status?.let { Text(it, Modifier.padding(top = 12.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }

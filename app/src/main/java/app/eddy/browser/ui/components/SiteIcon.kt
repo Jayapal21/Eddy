@@ -1,6 +1,8 @@
 package app.eddy.browser.ui.components
 
 import android.graphics.Bitmap
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -53,15 +55,19 @@ fun SiteIcon(
     }
     val shown = live ?: bitmap
     Box(modifier.size(size).clip(shape).background(background), contentAlignment = Alignment.Center) {
-        if (shown != null) {
-            Image(shown.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(size * 0.66f))
-        } else {
-            Text(
-                host.removePrefix("www.").firstOrNull()?.uppercase() ?: "•",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = (size.value * 0.42f).sp,
-                fontWeight = FontWeight.SemiBold,
-            )
+        Crossfade(targetState = shown, animationSpec = tween(180), label = "siteIconFade") { bmp ->
+            Box(Modifier.size(size), contentAlignment = Alignment.Center) {
+                if (bmp != null) {
+                    Image(bmp.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(size * 0.66f))
+                } else {
+                    Text(
+                        host.removePrefix("www.").firstOrNull()?.uppercase() ?: "•",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = (size.value * 0.42f).sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
         }
     }
 }

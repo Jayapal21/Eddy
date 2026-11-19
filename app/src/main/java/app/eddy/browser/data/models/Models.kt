@@ -1,6 +1,7 @@
 package app.eddy.browser.data.models
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
+enum class ReaderThemeMode { DARK, LIGHT }
 enum class ToolbarPosition { BOTTOM, TOP }
 enum class CookieMode { ALLOW_ALL, BLOCK_THIRD_PARTY, BLOCK_ALL }
 enum class HomepageMode { HOME, CUSTOM }
@@ -44,10 +45,11 @@ data class FilterList(
 
 data class Settings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val readerTheme: ReaderThemeMode = ReaderThemeMode.DARK,
     val amoled: Boolean = false,
     val dynamicColor: Boolean = true,
     val palette: Int = 0,
-    val toolbarPosition: ToolbarPosition = ToolbarPosition.BOTTOM,
+    val toolbarPosition: ToolbarPosition = ToolbarPosition.TOP,
     val homeDensity: HomeDensity = HomeDensity.COMFORTABLE,
     val motion: MotionPref = MotionPref.FULL,
     val shortcutStyle: ShortcutStyle = ShortcutStyle.MIXED,

@@ -8,6 +8,9 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import androidx.core.app.NotificationCompat
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 import androidx.webkit.Profile
 import androidx.webkit.ProfileStore
 import androidx.webkit.WebViewCompat
@@ -15,11 +18,13 @@ import androidx.webkit.WebViewFeature
 import androidx.webkit.WebViewStartUpConfig
 import app.eddy.browser.bookmarks.BookmarkManager
 import app.eddy.browser.browser.FaviconCache
+import app.eddy.browser.browser.MediaService
+import app.eddy.browser.browser.SavedArticleRepository
 import app.eddy.browser.data.database.EddyDatabase
 import app.eddy.browser.data.models.Settings
 import app.eddy.browser.data.preferences.SettingsStore
 import app.eddy.browser.downloads.DownloadEngine
-import app.eddy.browser.browser.MediaService
+import app.eddy.browser.downloads.DownloadEvent
 import app.eddy.browser.downloads.DownloadService
 import app.eddy.browser.history.HistoryManager
 import app.eddy.browser.passwords.PasswordManager
@@ -27,16 +32,21 @@ import app.eddy.browser.privacy.ContentBlocker
 import app.eddy.browser.privacy.FilterUpdateService
 import app.eddy.browser.privacy.SitePermissions
 import app.eddy.browser.tabs.TabThumbnailManager
+import app.eddy.browser.widget.SearchWidget
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Manual dependency graph; everything heavy is lazy so cold start only pays for what the first frame needs. */
 class AppContainer(private val app: Application) {
@@ -49,22 +59,38 @@ class AppContainer(private val app: Application) {
      * everything after that is observed asynchronously.
      */
     val settings: StateFlow<Settings> by lazy {
-        val initial = runBlocking {
-            settingsStore.migrateOnboardingFlag(isUpdatedInstall())
-            settingsStore.settings.first()
-        }
+        val initial = runBlocking { settingsStore.loadInitialSettings(::isUpdatedInstall) }
         settingsStore.settings.stateIn(scope, SharingStarted.Eagerly, initial)
     }
+
+    private val _downloadEvents = MutableSharedFlow<DownloadEvent>(extraBufferCapacity = 8)
+    val downloadEvents: SharedFlow<DownloadEvent> = _downloadEvents
 
     val database by lazy { EddyDatabase.create(app) }
     val history by lazy { HistoryManager(database.history(), scope) }
     val bookmarks by lazy { BookmarkManager(database.bookmarks(), scope) }
+    val savedArticles by lazy { SavedArticleRepository(database.savedArticles()) }
     val sites by lazy { SitePermissions(database.sites(), scope) }
     val passwords by lazy { PasswordManager(database.logins(), scope) }
     val favicons by lazy { FaviconCache(app, scope) }
     val thumbnails by lazy { TabThumbnailManager(app, scope) }
     val blocker by lazy { ContentBlocker(app, scope) }
-    val downloads by lazy { DownloadEngine(app, scope, database.downloads(), { settings.value }) { android.webkit.CookieManager.getInstance().getCookie(it).orEmpty() } }
+    val downloads by lazy {
+        ensureNotificationChannels()
+        DownloadEngine(
+            app,
+            scope,
+            database.downloads(),
+            { settings.value },
+            { android.webkit.CookieManager.getInstance().getCookie(it).orEmpty() },
+            _downloadEvents,
+        )
+    }
+
+    private val deferredStarted = AtomicBoolean(false)
+    private val channelsCreated = AtomicBoolean(false)
+    private val downloadObserverStarted = AtomicBoolean(false)
+    private var fallbackJob: Job? = null
 
     /** True when the app was installed earlier and has since been updated (first install time and last update differ). */
     private fun isUpdatedInstall(): Boolean = runCatching {
@@ -72,14 +98,41 @@ class AppContainer(private val app: Application) {
         info.lastUpdateTime - info.firstInstallTime > 60_000
     }.getOrDefault(false)
 
-    fun start() {
-        startWebViewEarly()
+    /**
+     * Schedules deferred startup as a fallback for non-Activity process starts (services, jobs, widgets).
+     * Normal Activity launches call [onFirstFrameRendered] right after the first frame draws.
+     */
+    fun scheduleBackgroundStartup() {
+        if (deferredStarted.get() || fallbackJob != null) return
+        fallbackJob = scope.launch(Dispatchers.IO) {
+            delay(BACKGROUND_FALLBACK_DELAY_MS)
+            onFirstFrameRendered()
+        }
+    }
+
+    /** Creates notification channels once, either post-first-frame or immediately before a download starts. */
+    fun ensureNotificationChannels() {
+        if (!channelsCreated.compareAndSet(false, true)) return
         DownloadService.createChannels(app)
         MediaService.createChannel(app)
-        FilterUpdateService.schedule(app)
-        scope.launch {
+    }
+
+    /** Runs non-critical services, IPCs, DB maintenance, and WebView warm-up after the initial frame renders. */
+    fun onFirstFrameRendered() {
+        if (!deferredStarted.compareAndSet(false, true)) return
+        fallbackJob?.cancel()
+        fallbackJob = null
+
+        startDownloadNotifications()
+
+        scope.launch(Dispatchers.IO) {
+            ensureNotificationChannels()
+            FilterUpdateService.schedule(app)
+            pushDynamicShortcuts()
+            startWebViewEarly()
+
             val initial = settings.value
-            blocker.reload(initial.filterLists)
+            blocker.ensureLoaded(initial.filterLists)
             // Refresh stale lists in the background at most once every three days.
             if (System.currentTimeMillis() - initial.filterListsUpdatedAt > STALE_MS) {
                 blocker.update(initial.filterLists)
@@ -87,8 +140,26 @@ class AppContainer(private val app: Application) {
             }
             history.prune()
         }
+    }
+
+    private fun pushDynamicShortcuts() {
+        // Long-press on the launcher icon offers an incognito tab; dynamic so it follows whichever icon alias is enabled.
+        runCatching {
+            ShortcutManagerCompat.pushDynamicShortcut(
+                app,
+                ShortcutInfoCompat.Builder(app, "incognito")
+                    .setShortLabel(app.getString(R.string.shortcut_incognito))
+                    .setIcon(IconCompat.createWithResource(app, R.drawable.ic_shortcut_incognito))
+                    .setIntent(Intent(app, MainActivity::class.java).setAction(SearchWidget.ACTION_INCOGNITO))
+                    .build(),
+            )
+        }
+    }
+
+    private fun startDownloadNotifications() {
+        if (!downloadObserverStarted.compareAndSet(false, true)) return
         scope.launch {
-            downloads.events.collect { event ->
+            downloadEvents.collect { event ->
                 val open = PendingIntent.getActivity(
                     app, 0, Intent(app, MainActivity::class.java).setAction(MainActivity.ACTION_OPEN_DOWNLOADS),
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
@@ -111,7 +182,7 @@ class AppContainer(private val app: Application) {
                     .setAutoCancel(true)
                     .apply { if (openFile != null) addAction(android.R.drawable.ic_menu_view, app.getString(R.string.open), openFile) }
                     .build()
-                runCatching { app.getSystemService(NotificationManager::class.java).notify(event.id.toInt() + 10_000, n) }
+                runCatching { app.getSystemService(NotificationManager::class.java)?.notify(event.id.toInt() + 10_000, n) }
             }
         }
     }
@@ -141,5 +212,6 @@ class AppContainer(private val app: Application) {
 
     private companion object {
         const val STALE_MS = 3L * 24 * 60 * 60 * 1000
+        const val BACKGROUND_FALLBACK_DELAY_MS = 1500L
     }
 }

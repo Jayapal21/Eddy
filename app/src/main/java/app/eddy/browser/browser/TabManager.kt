@@ -41,7 +41,7 @@ class ClosedTab(val url: String, val title: String, var state: Bundle?)
 class TabManager(
     private val context: Context,
     private val scope: CoroutineScope,
-    private val thumbnails: TabThumbnailManager,
+    private val thumbnails: () -> TabThumbnailManager,
     private val factory: () -> WebViewFactory,
     private val settings: () -> Settings,
     private val onPrivateSessionEnd: () -> Unit = {},
@@ -57,9 +57,25 @@ class TabManager(
 
     private val closed = ArrayDeque<ClosedTab>()
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val stateDir = File(context.filesDir, "tabstate").apply { mkdirs() }
+    private val stateDir by lazy { File(context.filesDir, "tabstate").apply { mkdirs() } }
     private val indexFile = File(context.filesDir, "tabs.json")
     private var persistJob: Job? = null
+    private var hostActivity: Context? = null
+    private var factoryCreated = false
+    private var thumbnailsCreated = false
+
+    private fun getFactory(): WebViewFactory {
+        factoryCreated = true
+        return factory().also { f ->
+            val act = hostActivity
+            if (f.activity !== act) f.activity = act
+        }
+    }
+
+    private fun getThumbnails(): TabThumbnailManager {
+        thumbnailsCreated = true
+        return thumbnails()
+    }
 
     /** Tab ids whose WebView is being built. Main-thread only, so a plain set is enough. */
     private val building = mutableSetOf<String>()
@@ -72,7 +88,7 @@ class TabManager(
 
     fun newTab(url: String = "", incognito: Boolean = false, select: Boolean = true, opener: BrowserTab? = null, group: String? = opener?.group): BrowserTab {
         val tab = BrowserTab(incognito = incognito, initialUrl = url).also { it.openerId = opener?.id; it.group = group }
-        if (incognito && tabs.none { it.incognito }) factory().startIncognitoSession()
+        if (incognito && tabs.none { it.incognito }) getFactory().startIncognitoSession()
         val at = opener?.let { tabs.indexOf(it) + 1 }?.takeIf { it > 0 } ?: tabs.size
         tabs.add(at, tab)
         // Build the view before selecting: select() may start ensureWebView() synchronously and would create a second one.
@@ -88,7 +104,7 @@ class TabManager(
     fun select(tab: BrowserTab) {
         val previous = selected
         if (previous != null && previous !== tab) {
-            thumbnails.capture(previous)
+            if (previous.webView != null) getThumbnails().capture(previous)
             previous.webView?.onPause()
         }
         selectedId = tab.id
@@ -117,13 +133,14 @@ class TabManager(
     }
 
     private fun createView(tab: BrowserTab, state: Bundle?, loadUrl: Boolean = true): EddyWebView {
-        val view = factory().create(tab)
+        val f = getFactory()
+        val view = f.create(tab)
         tab.painted = false
         tab.leftHome = false
         val restored = state != null && view.restoreState(state) != null
         tab.canGoBack = view.canGoBack()
         tab.canGoForward = view.canGoForward()
-        if (!restored && loadUrl && tab.url.isNotEmpty()) factory().load(tab, view, tab.url)
+        if (!restored && loadUrl && tab.url.isNotEmpty()) f.load(tab, view, tab.url)
         return view
     }
 
@@ -139,7 +156,27 @@ class TabManager(
         tab.isLoading = true
         val view = tab.webView ?: createView(tab, null, loadUrl = false).also { tab.webView = it }
         tab.leftHome = fromHome
-        factory().load(tab, view, url)
+        getFactory().load(tab, view, url)
+        requestPersist()
+    }
+
+    /** Renders a locally saved Reader Mode article directly in [tab] without network requests. */
+    fun loadOfflineHtml(tab: BrowserTab, url: String, title: String, html: String) {
+        val fromHome = tab.isHome
+        tab.restoreVersion++
+        tab.savedState = null
+        tab.hasPersistedState = false
+        tab.error?.sslHandler?.cancel()
+        tab.error = null
+        tab.url = url
+        tab.title = title
+        tab.readerAvailable = true
+        tab.readerActive = true
+        tab.isLoading = false
+        tab.painted = false
+        val view = tab.webView ?: createView(tab, null, loadUrl = false).also { tab.webView = it }
+        tab.leftHome = fromHome
+        view.loadDataWithBaseURL(url, html, "text/html", "UTF-8", url)
         requestPersist()
     }
 
@@ -159,6 +196,8 @@ class TabManager(
         tab.blockedCount = 0
         tab.hasPersistedState = false
         tab.savedState = null
+        tab.readerAvailable = false
+        tab.readerActive = false
         requestPersist()
     }
 
@@ -166,7 +205,7 @@ class TabManager(
         val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
         val tab = BrowserTab(incognito = parent.incognito, initialUrl = "about:blank").also { it.openerId = parent.id; it.popup = true; it.group = parent.group }
         tabs.add(tabs.indexOf(parent) + 1, tab)
-        val view = factory().create(tab)
+        val view = getFactory().create(tab)
         tab.painted = false
         // A popup a script fills with document.write reports no load at all; show it once nothing has started loading.
         view.postDelayed({ if (tab.progress == 0) tab.painted = true }, 500)
@@ -213,10 +252,12 @@ class TabManager(
         destroyView(tab)
         onClosed(tab)
         tab.error?.sslHandler?.cancel()
-        thumbnails.remove(tab.id)
+        if (!tab.isHome || thumbnailsCreated) getThumbnails().remove(tab.id)
         // Queued behind the read rememberClosed may have started: stateIo runs one file operation at a time.
-        val stateFile = File(stateDir, "${tab.id}.bin")
-        scope.launch(stateIo) { stateFile.delete() }
+        if (tab.hasPersistedState) {
+            val stateFile = File(stateDir, "${tab.id}.bin")
+            scope.launch(stateIo) { stateFile.delete() }
+        }
         if (wasSelected) selectAfterClose(index, tab)
         if (tab.incognito && tabs.none { it.incognito }) {
             sweepIncognitoProfiles()
@@ -275,8 +316,8 @@ class TabManager(
      */
     @android.annotation.SuppressLint("RequiresFeature")
     fun sweepIncognitoProfiles(attempt: Int = 0) {
-        if (!factory().incognitoIsolated) return
-        val active = if (tabs.any { it.incognito }) factory().incognitoProfile else null
+        if (!WebViewFactory.isIncognitoIsolated) return
+        val active = if (tabs.any { it.incognito }) getFactory().incognitoProfile else null
         val store = ProfileStore.getInstance()
         var pending = false
         for (name in store.allProfileNames) {
@@ -312,7 +353,7 @@ class TabManager(
 
     fun onTrimMemory(level: Int) {
         if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) evictInactive(1)
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) thumbnails.trim()
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND && thumbnailsCreated) getThumbnails().trim()
     }
 
     private fun destroyView(tab: BrowserTab) {
@@ -322,17 +363,21 @@ class TabManager(
         view.onScrolled = null
         view.onPull = null
         view.onPullRelease = null
-        factory().cancelPrerender(view)
+        if (factoryCreated) getFactory().cancelPrerender(view)
         (view.parent as? ViewGroup)?.removeView(view)
         view.stopLoading()
         view.destroy()
     }
 
-    fun onActivityCreated(activity: Context) { factory().activity = activity }
+    fun onActivityCreated(activity: Context) {
+        hostActivity = activity
+        if (factoryCreated) factory().activity = activity
+    }
 
     // shortcut: views built on this Activity keep its AutofillManager (and so the Activity) until evicted; rebuild them if recreation becomes common.
     fun onActivityDestroyed() {
-        factory().activity = null
+        hostActivity = null
+        if (factoryCreated) factory().activity = null
         tabs.forEach { it.webView?.detachFromActivity(context.applicationContext) }
     }
 
@@ -368,7 +413,9 @@ class TabManager(
                 indexFile.writeAtomically(index.toByteArray())
             }
         }
-        thumbnails.prune(tabs.map { it.id }.toSet())
+        if (thumbnailsCreated || tabs.any { !it.incognito && !it.isHome }) {
+            getThumbnails().prune(tabs.map { it.id }.toSet())
+        }
     }
 
     /** Rebuilds the tab list from disk. Only the selected tab gets a WebView; the rest stay dormant. */

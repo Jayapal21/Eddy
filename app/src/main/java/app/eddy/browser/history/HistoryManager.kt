@@ -25,6 +25,7 @@ class HistoryManager(private val dao: HistoryDao, private val scope: CoroutineSc
 
     fun frequentSites(limit: Int): Flow<List<SiteVisit>> = dao.frequentSites(limit)
     fun recentSites(limit: Int): Flow<List<SiteVisit>> = dao.recentSites(limit)
+    fun siteStats(limit: Int = 150): Flow<List<SiteVisit>> = dao.siteStats(limit)
 
     suspend fun suggest(query: String, limit: Int) = dao.suggest(query, limit)
 

@@ -6,10 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -20,6 +17,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import app.eddy.browser.privacy.SiteFeature
 import app.eddy.browser.ui.components.CheckRow
+import app.eddy.browser.ui.sakuga.SakugaAlertDialog
+import app.eddy.browser.ui.sakuga.SakugaOutlinedTextField
+import app.eddy.browser.ui.sakuga.SakugaTextButton
 
 /** Shows the oldest pending prompt; later ones appear as earlier ones are answered. */
 @Composable
@@ -27,14 +27,14 @@ fun PromptHost(vm: BrowserViewModel) {
     when (val p = vm.prompts.firstOrNull()) {
         is Prompt.Permission -> PermissionDialog(p, vm)
         is Prompt.HttpAuth -> AuthDialog(p, vm)
-        is Prompt.ExternalApp -> AlertDialog(
+        is Prompt.ExternalApp -> SakugaAlertDialog(
             onDismissRequest = { vm.answerExternal(p, false) },
             title = { Text(str(R.string.open_in_another_app_2)) },
             text = { Text(str(R.string.page_wants_to_open_app, p.intent.dataString ?: p.intent.`package` ?: str(R.string.unknown))) },
-            confirmButton = { TextButton(onClick = { vm.answerExternal(p, true) }) { Text(str(R.string.open)) } },
-            dismissButton = { TextButton(onClick = { vm.answerExternal(p, false) }) { Text(str(R.string.stay_here)) } },
+            confirmButton = { SakugaTextButton(onClick = { vm.answerExternal(p, true) }, burstOnClick = true) { Text(str(R.string.open)) } },
+            dismissButton = { SakugaTextButton(onClick = { vm.answerExternal(p, false) }) { Text(str(R.string.stay_here)) } },
         )
-        is Prompt.RiskyDownload -> AlertDialog(
+        is Prompt.RiskyDownload -> SakugaAlertDialog(
             onDismissRequest = { vm.answerRiskyDownload(p, false) },
             title = { Text(str(R.string.download_this_file)) },
             text = {
@@ -44,15 +44,15 @@ fun PromptHost(vm: BrowserViewModel) {
                         str(R.string.download_it_only_if_you_trust_this_site),
                 )
             },
-            confirmButton = { TextButton(onClick = { vm.answerRiskyDownload(p, true) }) { Text(str(R.string.download)) } },
-            dismissButton = { TextButton(onClick = { vm.answerRiskyDownload(p, false) }) { Text(str(R.string.cancel)) } },
+            confirmButton = { SakugaTextButton(onClick = { vm.answerRiskyDownload(p, true) }, burstOnClick = true) { Text(str(R.string.download)) } },
+            dismissButton = { SakugaTextButton(onClick = { vm.answerRiskyDownload(p, false) }) { Text(str(R.string.cancel)) } },
         )
-        is Prompt.Paste -> AlertDialog(
+        is Prompt.Paste -> SakugaAlertDialog(
             onDismissRequest = { vm.answerPaste(p, false) },
             title = { Text(str(R.string.paste_from_clipboard)) },
             text = { Text(str(R.string.host_wants_to_read_clipboard, p.host)) },
-            confirmButton = { TextButton(onClick = { vm.answerPaste(p, true) }) { Text(str(R.string.paste)) } },
-            dismissButton = { TextButton(onClick = { vm.answerPaste(p, false) }) { Text(str(R.string.block)) } },
+            confirmButton = { SakugaTextButton(onClick = { vm.answerPaste(p, true) }, burstOnClick = true) { Text(str(R.string.paste)) } },
+            dismissButton = { SakugaTextButton(onClick = { vm.answerPaste(p, false) }) { Text(str(R.string.block)) } },
         )
         null -> Unit
     }
@@ -69,12 +69,12 @@ private fun PermissionDialog(p: Prompt.Permission, vm: BrowserViewModel) {
             else -> it.name.lowercase()
         }
     }
-    AlertDialog(
+    SakugaAlertDialog(
         onDismissRequest = { vm.answerPermission(p, false, false) },
         title = { Text(str(R.string.allow_to_use_your, p.host, what)) },
         text = { if (!p.incognito) CheckRow(str(R.string.remember_my_choice_for_this_site), rememberChoice) { rememberChoice = it } },
-        confirmButton = { TextButton(onClick = { vm.answerPermission(p, true, rememberChoice) }) { Text(str(R.string.allow)) } },
-        dismissButton = { TextButton(onClick = { vm.answerPermission(p, false, rememberChoice) }) { Text(str(R.string.block)) } },
+        confirmButton = { SakugaTextButton(onClick = { vm.answerPermission(p, true, rememberChoice) }, burstOnClick = true) { Text(str(R.string.allow)) } },
+        dismissButton = { SakugaTextButton(onClick = { vm.answerPermission(p, false, rememberChoice) }) { Text(str(R.string.block)) } },
     )
 }
 
@@ -82,19 +82,19 @@ private fun PermissionDialog(p: Prompt.Permission, vm: BrowserViewModel) {
 private fun AuthDialog(p: Prompt.HttpAuth, vm: BrowserViewModel) {
     var user by remember(p) { mutableStateOf("") }
     var pass by remember(p) { mutableStateOf("") }
-    AlertDialog(
+    SakugaAlertDialog(
         onDismissRequest = { vm.answerAuth(p, null, null) },
         title = { Text(str(R.string.sign_in_to, p.host)) },
         text = {
             Column {
                 if (p.realm.isNotBlank()) Text(str(R.string.realm, p.realm))
                 Spacer(Modifier.height(12.dp))
-                OutlinedTextField(user, { user = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.username)) }, singleLine = true)
+                SakugaOutlinedTextField(user, { user = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.username)) }, singleLine = true)
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(pass, { pass = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.password)) }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+                SakugaOutlinedTextField(pass, { pass = it }, Modifier.fillMaxWidth(), label = { Text(str(R.string.password)) }, singleLine = true, visualTransformation = PasswordVisualTransformation())
             }
         },
-        confirmButton = { TextButton(onClick = { vm.answerAuth(p, user, pass) }) { Text(str(R.string.sign_in)) } },
-        dismissButton = { TextButton(onClick = { vm.answerAuth(p, null, null) }) { Text(str(R.string.cancel)) } },
+        confirmButton = { SakugaTextButton(onClick = { vm.answerAuth(p, user, pass) }, burstOnClick = true) { Text(str(R.string.sign_in)) } },
+        dismissButton = { SakugaTextButton(onClick = { vm.answerAuth(p, null, null) }) { Text(str(R.string.cancel)) } },
     )
 }

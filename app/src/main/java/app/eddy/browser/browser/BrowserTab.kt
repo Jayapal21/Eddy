@@ -51,6 +51,8 @@ class BrowserTab(
     var devToolsActive by mutableStateOf(false)
     /** Keeps reader mode on across navigations in this tab. */
     var readerActive by mutableStateOf(false)
+    /** True when Readability detects a compatible article on the currently loaded page. */
+    var readerAvailable by mutableStateOf(false)
     /** The http:// URL this tab was upgraded from, so a failed upgrade can offer the original. */
     @Volatile var httpsUpgradedFrom: String? = null
     var webView by mutableStateOf<EddyWebView?>(null)

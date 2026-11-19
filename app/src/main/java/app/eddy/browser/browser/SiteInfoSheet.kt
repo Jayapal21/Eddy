@@ -20,13 +20,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,6 +35,12 @@ import app.eddy.browser.data.database.SiteSettings
 import app.eddy.browser.privacy.SiteFeature
 import app.eddy.browser.privacy.get
 import app.eddy.browser.ui.components.SiteIcon
+import app.eddy.browser.ui.sakuga.SakugaCard
+import app.eddy.browser.ui.sakuga.SakugaModalBottomSheet
+import app.eddy.browser.ui.sakuga.SakugaOutlinedButton
+import app.eddy.browser.ui.sakuga.SakugaParticlePreset
+import app.eddy.browser.ui.sakuga.SakugaSwitch
+import app.eddy.browser.ui.sakuga.SakugaTextButton
 import app.eddy.browser.ui.theme.Dimens
 import app.eddy.browser.util.UrlUtils
 import java.text.DateFormat
@@ -59,7 +60,7 @@ fun SiteInfoSheet(vm: BrowserViewModel, tab: BrowserTab, onDismiss: () -> Unit) 
 
     fun set(feature: SiteFeature, value: Int?) { vm.setSiteSetting(tab, feature, value); refresh++ }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    SakugaModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(
             Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(horizontal = Dimens.gutterLarge).padding(bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -99,7 +100,7 @@ fun SiteInfoSheet(vm: BrowserViewModel, tab: BrowserTab, onDismiss: () -> Unit) 
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Switch(
+                SakugaSwitch(
                     checked = site?.contentBlocking != SiteSettings.BLOCK,
                     onCheckedChange = { set(SiteFeature.CONTENT_BLOCKING, if (it) null else SiteSettings.BLOCK) },
                     enabled = settings.adBlock || settings.trackerProtection,
@@ -109,7 +110,7 @@ fun SiteInfoSheet(vm: BrowserViewModel, tab: BrowserTab, onDismiss: () -> Unit) 
                 Text(str(R.string.page_text_size), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                 var zoomOpen by remember { mutableStateOf(false) }
                 val zoom = site?.get(SiteFeature.TEXT_ZOOM)
-                Surface(onClick = { zoomOpen = true }, shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
+                SakugaCard(onClick = { zoomOpen = true }, burstOnClick = true, shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
                     Text(
                         zoom?.let { "$it%" } ?: str(R.string.percent_default, settings.textZoom),
                         Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
@@ -131,7 +132,7 @@ fun SiteInfoSheet(vm: BrowserViewModel, tab: BrowserTab, onDismiss: () -> Unit) 
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(str(R.string.always_use_desktop_site), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                Switch(
+                SakugaSwitch(
                     checked = site?.desktop == SiteSettings.ALLOW,
                     onCheckedChange = { vm.toggleDesktopForSite(); refresh++ },
                 )
@@ -153,8 +154,8 @@ fun SiteInfoSheet(vm: BrowserViewModel, tab: BrowserTab, onDismiss: () -> Unit) 
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { vm.clearSiteData(tab); onDismiss() }) { Text(str(R.string.clear_site_data)) }
-                TextButton(onClick = { vm.sites.reset(host, tab.incognito); origin?.let { vm.sites.reset(it, tab.incognito) }; vm.setSiteSetting(tab, SiteFeature.CONTENT_BLOCKING, null); refresh++ }, enabled = site != null || permissions != null) { Text(str(R.string.reset_permissions)) }
+                SakugaOutlinedButton(onClick = { vm.clearSiteData(tab); onDismiss() }, particlePreset = SakugaParticlePreset.DELETE) { Text(str(R.string.clear_site_data)) }
+                SakugaTextButton(onClick = { vm.sites.reset(host, tab.incognito); origin?.let { vm.sites.reset(it, tab.incognito) }; vm.setSiteSetting(tab, SiteFeature.CONTENT_BLOCKING, null); refresh++ }, enabled = site != null || permissions != null) { Text(str(R.string.reset_permissions)) }
             }
         }
     }
@@ -165,7 +166,7 @@ private fun PermissionRow(label: String, value: Int?, defaultLabel: String, onCh
     var open by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().heightIn(min = Dimens.touchTarget), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-        Surface(onClick = { open = true }, shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
+        SakugaCard(onClick = { open = true }, burstOnClick = true, shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
             Text(
                 when (value) { SiteSettings.ALLOW -> str(R.string.allow); SiteSettings.BLOCK -> str(R.string.block); else -> defaultLabel },
                 Modifier.padding(horizontal = 14.dp, vertical = 8.dp),

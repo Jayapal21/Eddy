@@ -5,7 +5,9 @@ import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.toPath
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.toRect
 import androidx.compose.ui.graphics.Matrix
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
@@ -48,8 +50,15 @@ object EddyPolygons {
 /** A [Shape] that morphs between two polygons; [progress] 0 is [Morph.start], 1 is the target. */
 class MorphShape(private val morph: Morph, private val progress: Float) : Shape {
     override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
-        val path = morph.toPath(progress)
+        if (size.width <= 0f || size.height <= 0f || !size.width.isFinite() || !size.height.isFinite()) {
+            return Outline.Rectangle(Rect.Zero)
+        }
+        val t = progress.coerceIn(0f, 1f)
+        val path = morph.toPath(t)
         val b = path.getBounds()
+        if (b.width <= 0f || b.height <= 0f || !b.width.isFinite() || !b.height.isFinite()) {
+            return Outline.Rectangle(size.toRect())
+        }
         val m = Matrix().apply {
             scale(size.width / b.width, size.height / b.height)
             translate(-b.left, -b.top)
@@ -57,6 +66,11 @@ class MorphShape(private val morph: Morph, private val progress: Float) : Shape 
         path.transform(m)
         return Outline.Generic(path)
     }
+
+    override fun equals(other: Any?): Boolean =
+        this === other || (other is MorphShape && morph === other.morph && progress == other.progress)
+
+    override fun hashCode(): Int = 31 * System.identityHashCode(morph) + progress.hashCode()
 }
 
 @Composable
