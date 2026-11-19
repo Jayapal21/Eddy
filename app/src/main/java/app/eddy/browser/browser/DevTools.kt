@@ -27,11 +27,14 @@ object DevTools {
     fun show(context: Context, view: WebView) {
         val bundle = source(context) ?: return
         val js = "if(!window.eruda){" + bundle + "\neruda.init({defaults:{displaySize:55,theme:'Monokai Pro'}});}eruda.show();"
-        view.evaluateJavascript(js, null)
+        val eddy = view as? EddyWebView
+        if (eddy != null) eddy.safeEvaluateJavascript(js, null) else runCatching { view.evaluateJavascript(js, null) }
     }
 
     /** Removes the panel from the current page; a reload would drop it anyway. */
     fun hide(view: WebView) {
-        view.evaluateJavascript("if(window.eruda)eruda.destroy();", null)
+        val js = "if(window.eruda)eruda.destroy();"
+        val eddy = view as? EddyWebView
+        if (eddy != null) eddy.safeEvaluateJavascript(js, null) else runCatching { view.evaluateJavascript(js, null) }
     }
 }

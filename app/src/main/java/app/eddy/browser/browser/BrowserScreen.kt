@@ -19,8 +19,11 @@ import android.app.Activity
 import android.view.WindowManager
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.material3.Text
 import androidx.compose.animation.core.snap
@@ -30,12 +33,14 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
@@ -49,11 +54,12 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -97,8 +103,18 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
@@ -120,12 +136,12 @@ import app.eddy.browser.ui.animation.rememberHaptics
 import app.eddy.browser.ui.animation.spatialSpring
 import app.eddy.browser.ui.components.ChoiceDialog
 import app.eddy.browser.ui.components.LocalFavicons
-import app.eddy.browser.ui.sakuga.SakugaAlertDialog
+import app.eddy.browser.ui.sakuga.SakugaAnimationController
 import app.eddy.browser.ui.sakuga.SakugaButton
 import app.eddy.browser.ui.sakuga.SakugaCircularProgress
 import app.eddy.browser.ui.sakuga.SakugaModalBottomSheet
 import app.eddy.browser.ui.sakuga.SakugaSnackbar
-import app.eddy.browser.ui.sakuga.SakugaTextButton
+import app.eddy.browser.ui.sakuga.SakugaSpringType
 import app.eddy.browser.ui.theme.Dimens
 import app.eddy.browser.ui.theme.EddyTheme
 import app.eddy.browser.ui.theme.LocalReducedMotion
@@ -156,7 +172,11 @@ fun BrowserRoot(vm: BrowserViewModel) {
 
     EddyTheme(settings, incognito) {
         val scheme = MaterialTheme.colorScheme
-        LaunchedEffect(scheme.background) { vm.setPageBackground(scheme.background.toArgb()) }
+        LaunchedEffect(scheme.background, context) {
+            val argb = scheme.background.toArgb()
+            vm.setPageBackground(argb)
+            (context as? Activity)?.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(argb))
+        }
         var backProgress by remember { mutableFloatStateOf(0f) }
 
         PredictiveBackHandler(enabled = vm.canHandleBack) { events ->
@@ -226,22 +246,8 @@ fun BrowserRoot(vm: BrowserViewModel) {
                     OnboardingScreen(vm, settings)
                 }
 
-                // One-time announcement, held back until the welcome tour is out of the way.
-                if (settings.onboardingCompleted && !settings.discordAnnounced) {
-                    val dismiss = { vm.launchSettings { it.copy(discordAnnounced = true) } }
-                    SakugaAlertDialog(
-                        onDismissRequest = dismiss,
-                        title = { Text(str(R.string.discord_title)) },
-                        text = { Text(str(R.string.discord_message)) },
-                        confirmButton = {
-                            SakugaTextButton(onClick = { dismiss(); vm.openInNewTab(DiscordInvite) }, burstOnClick = true) { Text(str(R.string.discord_join)) }
-                        },
-                        dismissButton = { SakugaTextButton(onClick = dismiss) { Text(str(R.string.not_now)) } },
-                    )
-                }
-
-                // Once per update, after the tour and the Discord announcement. Fresh installs are marked seen when the tour ends.
-                if (settings.onboardingCompleted && settings.discordAnnounced && settings.changelogSeen < BuildConfig.VERSION_CODE) {
+                // Once per update, after the welcome tour completes. Fresh installs are marked seen when the tour ends.
+                if (shouldShowChangelog(settings, BuildConfig.VERSION_CODE)) {
                     // Stays null offline or when GitHub has no changelog for this build; the next launch tries again.
                     val notes by produceState<String?>(null) { value = fetchChangelog() }
                     notes?.let { text ->
@@ -290,7 +296,21 @@ fun BrowserRoot(vm: BrowserViewModel) {
     }
 }
 
-private const val DiscordInvite = "https://discord.gg/Q5NXwwwDph"
+internal fun shouldShowChangelog(settings: Settings, currentVersionCode: Int): Boolean =
+    settings.onboardingCompleted && settings.changelogSeen < currentVersionCode
+
+internal fun shouldShowHomeOverlay(
+    isHome: Boolean,
+    painted: Boolean,
+    leftHome: Boolean,
+    hasError: Boolean,
+): Boolean = isHome || (!painted && leftHome && !hasError)
+
+internal fun shouldShowOverlayOmnibox(
+    editing: Boolean,
+    showingHomeOverlay: Boolean,
+    homeShowSearch: Boolean,
+): Boolean = editing && (!showingHomeOverlay || !homeShowSearch)
 
 /**
  * The same per-versionCode notes F-Droid shows, read from the repo so they need no extra release step. Tries the
@@ -314,23 +334,36 @@ private suspend fun fetchChangelog(): String? = withContext(Dispatchers.IO) {
 
 @Composable
 private fun Overlay(visible: Boolean, modifier: Modifier, content: @Composable () -> Unit) {
+    val reduced = LocalReducedMotion.current
+    val fadeSpec = SakugaAnimationController.tweenSpec<Float>(SakugaAnimationController.SheetsAndDialogs.scrimAnimator, reduced)
+    val spatialSpec = SakugaAnimationController.springSpec<Float>(SakugaSpringType.PREMIUM, reduced)
+    val offsetSpec = SakugaAnimationController.springSpec<IntOffset>(SakugaSpringType.PREMIUM, reduced)
     AnimatedVisibility(
         visible = visible,
-        enter = fadeIn(effectSpring()) + scaleIn(spatialSpring(), initialScale = 0.92f) + slideInVertically(spatialSpring()) { it / 12 },
-        exit = fadeOut(effectSpring()) + scaleOut(spatialSpring(), targetScale = 0.94f),
+        enter = fadeIn(fadeSpec) + scaleIn(spatialSpec, initialScale = 0.96f) + slideInVertically(offsetSpec) { it / 20 },
+        exit = fadeOut(fadeSpec) + scaleOut(spatialSpec, targetScale = 0.97f),
     ) {
         Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { content() }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun BrowserPage(vm: BrowserViewModel, settings: Settings, tab: BrowserTab?) {
     val atTop = true
-    val showTopChrome = tab != null && !tab.isHome
+    val isHome = tab?.isHome != false
+    val showingHomeOverlay = tab != null && shouldShowHomeOverlay(
+        isHome = tab.isHome,
+        painted = tab.painted,
+        leftHome = tab.leftHome,
+        hasError = tab.error != null,
+    )
+    val showTopChrome = tab != null && !showingHomeOverlay
     val suggestions by vm.suggestions.collectAsStateWithLifecycle()
     val browsing = vm.screen == Screen.BROWSER
+    val density = LocalDensity.current
 
-    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val imeVisible = WindowInsets.ime.getBottom(density) > 0
     // Firefox-style tab swipe: dragging the bar slides the page and bar sideways and pulls the neighbouring tab in.
     val swipe = remember { Animatable(0f) }
     var pageWidth by remember { mutableIntStateOf(0) }
@@ -338,7 +371,7 @@ private fun BrowserPage(vm: BrowserViewModel, settings: Settings, tab: BrowserTa
     val scope = rememberCoroutineScope()
     val settle = spatialSpring<Float>()
     val slide = spatialSpring<Float>(bouncy = false)
-    val tabSwipe = Modifier.pointerInput(Unit) {
+    val tabSwipeGestures = Modifier.pointerInput(Unit) {
         val tracker = VelocityTracker()
         detectHorizontalDragGestures(
             onDragStart = { tracker.resetTracking() },
@@ -375,20 +408,47 @@ private fun BrowserPage(vm: BrowserViewModel, settings: Settings, tab: BrowserTa
             onDragStart = { dy = 0f },
             onDragEnd = { if (dy > 48.dp.toPx()) { haptics.tick(); vm.openTabSwitcher() } },
         ) { _, d -> dy += d }
-    }.graphicsLayer { translationX = swipe.value }
+    }
     val swipeDir by remember { derivedStateOf { sign(swipe.value).toInt() } }
 
-    val isHome = tab?.isHome != false
-    val overlayEditing = vm.editing && !isHome
+    val overlayEditing = shouldShowOverlayOmnibox(
+        editing = vm.editing,
+        showingHomeOverlay = showingHomeOverlay,
+        homeShowSearch = settings.homeShowSearch,
+    )
     val reduced = LocalReducedMotion.current
+    val headerMode = vm.headerMode
     val readerActive = tab?.readerActive == true
     val readerPalette = rememberAnimatedReaderPalette(settings.readerTheme)
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val defaultFrost = rememberFrostHeaderColors(isDarkTheme)
     val readerFrost = remember(readerPalette) { ReaderThemeManager.toFrostHeaderColors(readerPalette) }
+    val activeFrost = if (readerActive) readerFrost else defaultFrost
+    val progressAccent = if (readerActive) readerPalette.accent else defaultFrost.accent
     val chromeAlpha by animateFloatAsState(
         targetValue = if (overlayEditing) 0f else 1f,
         animationSpec = tween(if (reduced) 0 else 160, easing = FastOutSlowInEasing),
         label = "chromeEditFade",
     )
+
+    val interactionState = HeaderInteractionState(
+        isHome = isHome || showingHomeOverlay,
+        editing = vm.editing,
+        findActive = vm.find != null,
+        menuVisible = vm.menuVisible,
+        siteInfoVisible = vm.siteInfoVisible,
+        translateVisible = vm.translateVisible,
+        linkSheetVisible = vm.linkTarget != null,
+        savePromptVisible = vm.savePrompt != null,
+        autofillVisible = vm.autofillOffer != null,
+        promptsCount = vm.prompts.size,
+        fullscreen = vm.fullscreen,
+        customViewActive = vm.customViewActive,
+        screenIsBrowser = browsing,
+    )
+    LaunchedEffect(interactionState) {
+        vm.syncHeaderBlockers(interactionState)
+    }
 
     LaunchedEffect(tab?.id, readerActive, settings.readerTheme, reduced) {
         if (readerActive) {
@@ -396,13 +456,113 @@ private fun BrowserPage(vm: BrowserViewModel, settings: Settings, tab: BrowserTa
         }
     }
 
+    val statusBarTopDp = WindowInsets.safeDrawing.only(WindowInsetsSides.Top).asPaddingValues().calculateTopPadding()
+    val fallbackExpandedHeaderHeight = statusBarTopDp + Dimens.urlCapsuleHeight + Dimens.headerVerticalPadding * 2
+    var measuredExpandedHeightPx by remember { mutableIntStateOf(0) }
+    val resolvedExpandedHeaderHeight = with(density) { measuredExpandedHeightPx.toDp() }
+        .takeIf { measuredExpandedHeightPx > 0 }
+        ?: fallbackExpandedHeaderHeight
+
+    // Expanded mode keeps the classic non-obscuring top layout; Compact & Hidden extend WebView behind status bar/cutout.
+    val reserveTopForExpanded = showTopChrome &&
+        headerMode == HeaderMode.EXPANDED &&
+        !vm.fullscreen &&
+        !overlayEditing &&
+        tab?.painted == true
+    val targetWebTopInset = if (reserveTopForExpanded) resolvedExpandedHeaderHeight else 0.dp
+    val animatedWebTopInset by animateDpAsState(
+        targetValue = targetWebTopInset,
+        animationSpec = if (reduced) snap() else spring(dampingRatio = 0.88f, stiffness = 430f),
+        label = "webTopInset",
+    )
+    LaunchedEffect(reserveTopForExpanded) {
+        vm.headerController.suppressScrollForLayoutTransition(340L)
+    }
+
     val pageBackdrop = if (readerActive) readerPalette.background else MaterialTheme.colorScheme.background
+    val pageBackdropArgb = pageBackdrop.toArgb()
 
     Box(Modifier.fillMaxSize().background(pageBackdrop).onSizeChanged { pageWidth = it.width }) {
-        // On web pages, the top omnibox overlay handles its own insets; on HomeScreen, the unified adaptive search bar resizes with IME insets.
-        Column(Modifier.fillMaxSize().then(if (overlayEditing) Modifier else Modifier.imePadding())) {
+        // Websites extend edge-to-edge in Compact & Hidden modes, and yield cleanly below the expanded header in Expanded mode.
+        Box(Modifier.fillMaxSize().then(if (overlayEditing) Modifier else Modifier.imePadding())) {
+            // Sits edge-to-edge so the neighbouring tab preview lines up 1:1 with the current page.
+            if (swipeDir != 0) vm.adjacentTab(-swipeDir)?.let {
+                TabPeek(vm, it, Modifier) { swipe.value - swipeDir * pageWidth }
+            }
+            if (tab != null) Box(Modifier.fillMaxSize().graphicsLayer { translationX = swipe.value }.background(pageBackdrop)) {
+                if (!tab.isHome) {
+                    WebContent(
+                        tab = tab,
+                        backdropArgb = pageBackdropArgb,
+                        visible = browsing,
+                        modifier = Modifier.padding(top = animatedWebTopInset),
+                    )
+                }
+                // A link from the start page keeps the start page up until the page draws, like Chrome, so no blank
+                // frame shows between them. Same slot as before the load, so the start page does not re-animate.
+                if (showingHomeOverlay) {
+                    val homeInsets = WindowInsets.safeDrawing
+                        .only(WindowInsetsSides.Top + WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)
+                        .asPaddingValues()
+                    HomeScreen(vm, settings, tab.incognito, homeInsets)
+                } else if (!tab.painted && tab.error == null) {
+                    // Covers the WebView with the theme backdrop until the first frame commits.
+                    Box(Modifier.fillMaxSize().background(pageBackdrop))
+                }
+                PullIndicator(tab, topClearance = animatedWebTopInset)
+                EdgeSwipeIndicator(
+                    direction = vm.edgeSwipeDirection,
+                    progress = vm.edgeSwipeProgress,
+                    frost = activeFrost,
+                )
+                tab.error?.let { err ->
+                    Box(Modifier.fillMaxSize().padding(top = animatedWebTopInset)) {
+                        ErrorPage(
+                            err, onRetry = vm::retry, onBack = vm::cancelSslError.takeIf { err.kind == ErrorKind.SSL } ?: vm::goBack,
+                            onProceedUnsafe = vm::proceedDespiteSslError,
+                            onContinueInsecure = vm::continueWithoutHttps,
+                        )
+                    }
+                }
+            }
+
+            // Status-bar legibility scrim when webpage extends underneath status bar & display cutout in Compact/Hidden states.
+            val showContrastScrim = showTopChrome && !overlayEditing && !vm.fullscreen && tab?.painted == true
+            if (showContrastScrim) {
+                val scrimAlpha by animateFloatAsState(
+                    targetValue = when (headerMode) {
+                        HeaderMode.EXPANDED -> 0f
+                        HeaderMode.COMPACT -> if (isDarkTheme) 0.50f else 0.62f
+                        HeaderMode.HIDDEN -> if (isDarkTheme) 0.42f else 0.54f
+                    },
+                    animationSpec = if (reduced) snap() else tween(220, easing = FastOutSlowInEasing),
+                    label = "statusBarContrastScrim",
+                )
+                if (scrimAlpha > 0.01f) {
+                    val topColor = if (isDarkTheme) Color.Black else activeFrost.backdrop
+                    val brush = remember(topColor, scrimAlpha) {
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                topColor.copy(alpha = scrimAlpha),
+                                topColor.copy(alpha = scrimAlpha * 0.45f),
+                                Color.Transparent,
+                            ),
+                        )
+                    }
+                    Box(
+                        Modifier
+                            .align(Alignment.TopCenter)
+                            .fillMaxWidth()
+                            .height(statusBarTopDp + 16.dp)
+                            .background(brush),
+                    )
+                }
+            }
+
+            // Dynamic Island inspired adaptive 3-state header.
             AnimatedVisibility(
                 visible = showTopChrome,
+                modifier = Modifier.align(Alignment.TopCenter),
                 enter = if (reduced) fadeIn(tween(0)) else fadeIn(tween(220, easing = FastOutSlowInEasing)) +
                     slideInVertically(tween(240, easing = FastOutSlowInEasing)) { -it / 3 },
                 exit = if (reduced) fadeOut(tween(0)) else fadeOut(tween(160, easing = FastOutSlowInEasing)) +
@@ -411,68 +571,129 @@ private fun BrowserPage(vm: BrowserViewModel, settings: Settings, tab: BrowserTa
                 Chrome(
                     vm = vm,
                     tab = tab,
+                    headerMode = headerMode,
                     atTop = true,
                     hidden = imeVisible && !vm.editing,
-                    swipe = tabSwipe.graphicsLayer { alpha = chromeAlpha },
+                    visualModifier = Modifier.graphicsLayer {
+                        translationX = swipe.value
+                        alpha = chromeAlpha
+                    },
+                    swipeModifier = tabSwipeGestures,
+                    onMeasureExpandedHeight = { h ->
+                        if (h > 0) measuredExpandedHeightPx = h
+                    },
                     overrideFrostColors = readerFrost.takeIf { readerActive },
                 )
             }
-            Box(Modifier.weight(1f).fillMaxWidth().navigationBarsPadding()) {
-                // Sits in the page area so the screenshot lines up with the page it replaces.
-                if (swipeDir != 0) vm.adjacentTab(-swipeDir)?.let {
-                    TabPeek(vm, it, if (showTopChrome) Modifier else Modifier.statusBarsPadding()) { swipe.value - swipeDir * pageWidth }
-                }
-                if (tab != null) Box(Modifier.fillMaxSize().graphicsLayer { translationX = swipe.value }.background(pageBackdrop)) {
-                    if (!tab.isHome) WebContent(tab, visible = browsing)
-                    // A link from the start page keeps the start page up until the page draws, like Chrome, so no blank
-                    // frame shows between them. Same slot as before the load, so the start page does not re-animate.
-                    if (tab.isHome || (!tab.painted && tab.leftHome)) {
-                        HomeScreen(vm, settings, tab.incognito, if (showTopChrome) PaddingValues() else WindowInsets.statusBars.asPaddingValues())
-                    } else if (!tab.painted) {
-                        // Covers the new WebView's empty white until the page draws; the toolbar shows the progress.
-                        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
-                    }
-                    PullIndicator(tab)
-                    tab.error?.let { err ->
-                        ErrorPage(
-                            err, onRetry = vm::retry, onBack = vm::cancelSslError.takeIf { err.kind == ErrorKind.SSL } ?: vm::goBack,
-                            onProceedUnsafe = vm::proceedDespiteSslError,
-                            onContinueInsecure = vm::continueWithoutHttps,
+
+            // Subtle top cutout/status-bar interaction band while hidden: double-tap or pull down reveals the header.
+            if (showTopChrome && headerMode == HeaderMode.HIDDEN && !overlayEditing && !(imeVisible && !vm.editing)) {
+                val revealHint = str(R.string.double_tap_to_toggle_toolbar)
+                val zoneSource = remember { MutableInteractionSource() }
+                Box(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .width(216.dp)
+                        .height(statusBarTopDp.coerceAtLeast(32.dp))
+                        .pointerInput(Unit) {
+                            var dragY = 0f
+                            detectVerticalDragGestures(
+                                onDragStart = { dragY = 0f },
+                                onDragEnd = {
+                                    if (dragY > 28.dp.toPx()) {
+                                        haptics.tick()
+                                        vm.showChrome()
+                                    }
+                                },
+                            ) { _, delta -> dragY += delta }
+                        }
+                        .combinedClickable(
+                            interactionSource = zoneSource,
+                            indication = null,
+                            role = androidx.compose.ui.semantics.Role.Button,
+                            onClickLabel = revealHint,
+                            onClick = {},
+                            onDoubleClick = {
+                                haptics.tick()
+                                vm.toggleHeaderManual()
+                            },
                         )
-                    }
-                }
-                FindLayer(vm, atTop, Modifier.align(Alignment.TopCenter))
-                AutofillLayer(vm, tab, imeVisible, Modifier.align(Alignment.BottomCenter))
-                SaveLoginLayer(vm, tab, atTop, Modifier.align(Alignment.TopCenter))
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = readerActive && !overlayEditing && vm.find == null && !imeVisible,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
+                        .semantics { contentDescription = revealHint }
+                        .testTag("header_hidden_tap_zone"),
+                )
+            }
+
+            if (tab != null && headerMode != HeaderMode.COMPACT) {
+                val progressModifier = if (reserveTopForExpanded) {
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .offset { IntOffset(0, (animatedWebTopInset.roundToPx() - 2.5.dp.roundToPx()).coerceAtLeast(0)) }
                         .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
-                        .padding(horizontal = 12.dp)
-                        .padding(bottom = 18.dp),
-                    enter = if (reduced) fadeIn(tween(0)) else fadeIn(tween(220, easing = FastOutSlowInEasing)) +
-                        scaleIn(tween(240, easing = FastOutSlowInEasing), initialScale = 0.88f),
-                    exit = if (reduced) fadeOut(tween(0)) else fadeOut(tween(160, easing = FastOutSlowInEasing)) +
-                        scaleOut(tween(160, easing = FastOutSlowInEasing), targetScale = 0.90f),
-                ) {
-                    val articleSaved by vm.isArticleSaved.collectAsStateWithLifecycle()
-                    val savedArticles by vm.savedArticlesList.collectAsStateWithLifecycle()
-                    ReaderControlBar(
-                        mode = settings.readerTheme,
-                        palette = readerPalette,
-                        ttsState = vm.ttsState,
-                        ttsProgress = vm.ttsProgress,
-                        articleSaved = articleSaved,
-                        savingOffline = vm.savingOffline,
-                        savedArticlesCount = savedArticles.size,
-                        onToggleTts = vm::toggleReaderTts,
-                        onStopTts = vm::stopReading,
-                        onToggleTheme = vm::toggleReaderTheme,
-                        onToggleOfflineSave = vm::toggleOfflineSave,
-                        onOpenSavedArticles = { vm.screen = Screen.SAVED_ARTICLES },
-                    )
+                } else {
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                 }
+                BrowserProgressBar(
+                    tab = tab,
+                    accentColor = progressAccent,
+                    modifier = progressModifier,
+                )
+            }
+
+            FindLayer(
+                vm,
+                atTop,
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
+            )
+            AutofillLayer(
+                vm,
+                tab,
+                imeVisible,
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
+            )
+            SaveLoginLayer(
+                vm,
+                tab,
+                atTop,
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
+            )
+            androidx.compose.animation.AnimatedVisibility(
+                visible = readerActive && !overlayEditing && vm.find == null && !imeVisible,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 18.dp),
+                enter = if (reduced) fadeIn(tween(0)) else fadeIn(tween(220, easing = FastOutSlowInEasing)) +
+                    scaleIn(tween(240, easing = FastOutSlowInEasing), initialScale = 0.88f),
+                exit = if (reduced) fadeOut(tween(0)) else fadeOut(tween(160, easing = FastOutSlowInEasing)) +
+                    scaleOut(tween(160, easing = FastOutSlowInEasing), targetScale = 0.90f),
+            ) {
+                val articleSaved by vm.isArticleSaved.collectAsStateWithLifecycle()
+                val savedArticles by vm.savedArticlesList.collectAsStateWithLifecycle()
+                ReaderControlBar(
+                    mode = settings.readerTheme,
+                    palette = readerPalette,
+                    ttsState = vm.ttsState,
+                    ttsProgress = vm.ttsProgress,
+                    articleSaved = articleSaved,
+                    savingOffline = vm.savingOffline,
+                    savedArticlesCount = savedArticles.size,
+                    onToggleTts = vm::toggleReaderTts,
+                    onStopTts = vm::stopReading,
+                    onToggleTheme = vm::toggleReaderTheme,
+                    onToggleOfflineSave = vm::toggleOfflineSave,
+                    onOpenSavedArticles = { vm.screen = Screen.SAVED_ARTICLES },
+                )
             }
         }
 
@@ -515,44 +736,90 @@ private fun BrowserPage(vm: BrowserViewModel, settings: Settings, tab: BrowserTa
     }
 }
 
-/** Floating charcoal frost-glass header bar. While scrolling down only a slim pill remains, so the page gets the room. */
+/** Adaptive 3-state Dynamic Island header bar. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun Chrome(
     vm: BrowserViewModel,
     tab: BrowserTab?,
+    headerMode: HeaderMode,
     atTop: Boolean,
     hidden: Boolean,
-    swipe: Modifier,
+    visualModifier: Modifier,
+    swipeModifier: Modifier,
+    onMeasureExpandedHeight: (Int) -> Unit,
     overrideFrostColors: app.eddy.browser.ui.theme.FrostHeaderColors? = null,
 ) {
     val home = tab?.isHome != false
-    val expanded = vm.chromeVisible || home
-    // Full screen leaves only the page; scrolling up brings the whole toolbar back.
-    if (hidden || vm.fullscreen && !expanded) return
-    val defaultFrost = rememberFrostHeaderColors(MaterialTheme.colorScheme.background.luminance() < 0.5f)
+    val effectiveMode = if (home) HeaderMode.EXPANDED else headerMode
+    if (hidden) return
+    val reduced = LocalReducedMotion.current
+    val haptics = rememberHaptics()
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val defaultFrost = rememberFrostHeaderColors(isDark)
     val frost = overrideFrostColors ?: defaultFrost
+    val expandedBgAlpha by animateFloatAsState(
+        targetValue = if (effectiveMode == HeaderMode.EXPANDED) 1f else 0f,
+        animationSpec = if (reduced) snap() else tween(200, easing = FastOutSlowInEasing),
+        label = "headerExpandedBackdropAlpha",
+    )
+    val headerBackdrop = remember(frost.backdrop, expandedBgAlpha) {
+        Brush.verticalGradient(
+            colors = listOf(
+                frost.backdrop.copy(alpha = 0.98f * expandedBgAlpha),
+                frost.backdrop.copy(alpha = 0.94f * expandedBgAlpha),
+            ),
+        )
+    }
+    val expandedSource = remember { MutableInteractionSource() }
+
     Column(
-        Modifier.fillMaxWidth()
-            .background(frost.backdrop)
+        Modifier
+            .fillMaxWidth()
+            .onSizeChanged { size ->
+                if (effectiveMode == HeaderMode.EXPANDED && size.height > 0) {
+                    onMeasureExpandedHeight(size.height)
+                }
+            }
+            .background(headerBackdrop)
+            .then(
+                if (effectiveMode == HeaderMode.EXPANDED && !home) {
+                    Modifier.combinedClickable(
+                        interactionSource = expandedSource,
+                        indication = null,
+                        onClick = {},
+                        onDoubleClick = {
+                            haptics.tick()
+                            vm.toggleHeaderManual()
+                        },
+                    )
+                } else Modifier,
+            )
             .then(
                 if (atTop) Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                 else Modifier.navigationBarsPadding(),
             )
-            .padding(horizontal = Dimens.headerHorizontalPadding, vertical = Dimens.headerVerticalPadding),
+            .padding(
+                horizontal = Dimens.headerHorizontalPadding,
+                vertical = if (effectiveMode == HeaderMode.EXPANDED) Dimens.headerVerticalPadding else 4.dp,
+            ),
         verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(Dimens.chromeGap),
     ) {
         BrowserBar(
             tab = tab,
             tabCount = vm.tabs.tabs.count { it.incognito == (tab?.incognito == true) },
-            compact = !expanded,
+            headerMode = effectiveMode,
             onHome = vm::goHome,
             onEdit = vm::startEditing,
             onExpand = vm::showChrome,
+            onToggleHide = vm::toggleHeaderManual,
+            onHeaderTouchChanged = vm::setHeaderTouched,
             onSiteInfo = { vm.siteInfoVisible = true },
             onStop = vm::reloadOrStop,
             onTabs = vm::openTabSwitcher,
             onMenu = { vm.menuVisible = true },
-            modifier = swipe,
+            modifier = visualModifier,
+            swipeModifier = swipeModifier,
             onToggleReader = vm::toggleReader,
             overrideFrostColors = overrideFrostColors,
         )
@@ -560,10 +827,10 @@ private fun Chrome(
 }
 
 @Composable
-private fun WebContent(tab: BrowserTab, visible: Boolean, modifier: Modifier = Modifier) {
+private fun WebContent(tab: BrowserTab, backdropArgb: Int, visible: Boolean, modifier: Modifier = Modifier) {
     val web = tab.webView
     if (web == null) {
-        Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
+        Box(modifier.fillMaxSize().background(Color(backdropArgb)))
         return
     }
     val activity = LocalContext.current
@@ -572,19 +839,167 @@ private fun WebContent(tab: BrowserTab, visible: Boolean, modifier: Modifier = M
             factory = {
                 (web.parent as? ViewGroup)?.removeView(web)
                 web.attachTo(activity)
+                web.applyBackgroundColor(backdropArgb)
                 // AndroidView defaults to WRAP_CONTENT, which puts WebView in wrap-content mode where 100vh/dvh resolve to 0.
                 web.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                 web
             },
-            update = { it.visibility = if (visible) View.VISIBLE else View.INVISIBLE },
+            update = { view ->
+                view.applyBackgroundColor(backdropArgb)
+                view.visibility = if (visible) View.VISIBLE else View.INVISIBLE
+            },
             modifier = modifier.fillMaxSize(),
         )
     }
 }
 
+/** Subtle, smooth top-edge loading indicator reflecting WebView navigation progress without layout shifts. */
+internal data class BrowserProgressTarget(
+    val visible: Boolean,
+    val fraction: Float,
+    val completedCleanly: Boolean,
+)
+
+internal fun resolveBrowserProgress(
+    isHome: Boolean,
+    isLoading: Boolean,
+    rawProgress: Int,
+    hasError: Boolean,
+): BrowserProgressTarget {
+    if (isHome || hasError) {
+        return BrowserProgressTarget(visible = false, fraction = 0f, completedCleanly = false)
+    }
+    if (isLoading) {
+        return BrowserProgressTarget(
+            visible = true,
+            fraction = rawProgress.coerceIn(5, 100) / 100f,
+            completedCleanly = false,
+        )
+    }
+    val finished = rawProgress >= 100
+    return BrowserProgressTarget(
+        visible = false,
+        fraction = if (finished) 1f else 0f,
+        completedCleanly = finished,
+    )
+}
+
+private val ProgressDeceleration = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
+
+@Composable
+private fun BrowserProgressBar(
+    tab: BrowserTab,
+    accentColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    val reduced = LocalReducedMotion.current
+    val target = resolveBrowserProgress(
+        isHome = tab.isHome,
+        isLoading = tab.isLoading,
+        rawProgress = tab.progress,
+        hasError = tab.error != null,
+    )
+    val animatedProgress = remember(tab.id) { Animatable(0f) }
+    val animatedAlpha = remember(tab.id) { Animatable(0f) }
+    var wasLoading by remember(tab.id) { mutableStateOf(false) }
+    var lastUrl by remember(tab.id) { mutableStateOf(tab.url) }
+
+    LaunchedEffect(tab.id, target, tab.url, reduced) {
+        if (target.visible) {
+            val freshStart = !wasLoading ||
+                animatedProgress.value >= 0.99f ||
+                (tab.url != lastUrl && target.fraction <= 0.15f)
+            if (freshStart) {
+                animatedProgress.snapTo(0f)
+            }
+            wasLoading = true
+            lastUrl = tab.url
+            val nextFraction = maxOf(animatedProgress.value, target.fraction)
+            launch {
+                animatedAlpha.animateTo(
+                    1f,
+                    tween(if (reduced) 0 else 120, easing = FastOutSlowInEasing),
+                )
+            }
+            animatedProgress.animateTo(
+                nextFraction,
+                tween(if (reduced) 0 else 240, easing = ProgressDeceleration),
+            )
+        } else {
+            if (wasLoading && target.completedCleanly) {
+                animatedProgress.animateTo(
+                    1f,
+                    tween(if (reduced) 0 else 160, easing = FastOutSlowInEasing),
+                )
+                animatedAlpha.animateTo(
+                    0f,
+                    tween(if (reduced) 0 else 240, easing = FastOutSlowInEasing),
+                )
+            } else {
+                animatedAlpha.animateTo(
+                    0f,
+                    tween(if (reduced) 0 else 140, easing = FastOutSlowInEasing),
+                )
+            }
+            wasLoading = false
+            lastUrl = tab.url
+            animatedProgress.snapTo(0f)
+        }
+    }
+
+    val alpha = animatedAlpha.value.coerceIn(0f, 1f)
+    if (alpha <= 0.001f) return
+    val fillFraction = animatedProgress.value.coerceIn(0f, 1f)
+
+    Canvas(
+        modifier
+            .fillMaxWidth()
+            .height(2.5.dp)
+            .semantics {
+                progressBarRangeInfo = ProgressBarRangeInfo(fillFraction, 0f..1f)
+            }
+            .testTag("browser_loading_progress"),
+    ) {
+        val h = size.height
+        drawRect(color = accentColor.copy(alpha = 0.14f * alpha))
+        val barW = size.width * fillFraction
+        if (barW > 0.5f) {
+            val tipColor = lerp(accentColor, Color.White, 0.28f)
+            drawRoundRect(
+                brush = Brush.horizontalGradient(
+                    colors = listOf(
+                        accentColor.copy(alpha = 0.88f * alpha),
+                        accentColor.copy(alpha = alpha),
+                        tipColor.copy(alpha = alpha),
+                    ),
+                    startX = 0f,
+                    endX = barW,
+                ),
+                size = Size(barW, h),
+                cornerRadius = CornerRadius(h / 2f, h / 2f),
+            )
+            if (!reduced && fillFraction < 0.995f) {
+                drawCircle(
+                    color = accentColor.copy(alpha = 0.28f * alpha),
+                    radius = h * 1.35f,
+                    center = Offset(barW, h / 2f),
+                )
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.85f * alpha),
+                    radius = h * 0.55f,
+                    center = Offset(barW, h / 2f),
+                )
+            }
+        }
+    }
+}
+
 /** Like Firefox: the spinner follows the finger, then parks and spins until the reload finishes. */
 @Composable
-private fun androidx.compose.foundation.layout.BoxScope.PullIndicator(tab: BrowserTab) {
+private fun androidx.compose.foundation.layout.BoxScope.PullIndicator(
+    tab: BrowserTab,
+    topClearance: androidx.compose.ui.unit.Dp,
+) {
     LaunchedEffect(tab.isLoading) { if (!tab.isLoading) tab.refreshing = false }
     val pull = tab.pullDistance
     val threshold = with(LocalDensity.current) { 72.dp.toPx() }
@@ -598,8 +1013,9 @@ private fun androidx.compose.foundation.layout.BoxScope.PullIndicator(tab: Brows
     if (y < 1f) return
     val progress = (y / threshold).coerceIn(0f, 1f)
     Surface(
-        Modifier.align(Alignment.TopCenter).statusBarsPadding()
-            .offset { IntOffset(0, y.toInt() - 48.dp.roundToPx()) }
+        Modifier.align(Alignment.TopCenter)
+            .then(if (topClearance > 0.dp) Modifier.padding(top = topClearance) else Modifier.statusBarsPadding())
+            .offset { IntOffset(0, (y.toInt() - 12.dp.roundToPx()).coerceAtLeast(0)) }
             .size(40.dp).alpha(progress),
         shape = CircleShape,
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -610,6 +1026,60 @@ private fun androidx.compose.foundation.layout.BoxScope.PullIndicator(tab: Brows
             SakugaCircularProgress(spinner, strokeWidth = 2.5.dp)
         } else {
             SakugaCircularProgress(spinner.rotate(progress * 180f), progress = { progress * 0.8f }, strokeWidth = 2.5.dp)
+        }
+    }
+}
+
+/** Frosted edge chevron pill providing responsive tactile feedback for edge-aware back/forward swipes. */
+@Composable
+private fun androidx.compose.foundation.layout.BoxScope.EdgeSwipeIndicator(
+    direction: Int,
+    progress: Float,
+    frost: app.eddy.browser.ui.theme.FrostHeaderColors,
+) {
+    val reduced = LocalReducedMotion.current
+    val haptics = rememberHaptics()
+    val visible = direction != 0 && progress > 0.04f
+    val clamped = progress.coerceIn(0f, 1.35f)
+    val armed = clamped >= 1f
+    LaunchedEffect(armed, direction) {
+        if (armed && direction != 0) haptics.tick()
+    }
+    val smoothProgress by animateFloatAsState(
+        targetValue = if (visible) clamped else 0f,
+        animationSpec = if (reduced) snap() else spring(dampingRatio = 0.78f, stiffness = 520f),
+        label = "edgeSwipeProgress",
+    )
+    if (!visible && smoothProgress <= 0.01f) return
+
+    val isBack = direction < 0
+    val travelPx = with(LocalDensity.current) { (40.dp * smoothProgress.coerceAtMost(1.15f)).toPx() }
+    val scale = if (armed) 1.08f else (0.82f + 0.18f * smoothProgress.coerceAtMost(1f))
+
+    Surface(
+        modifier = Modifier
+            .align(if (isBack) Alignment.CenterStart else Alignment.CenterEnd)
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+            .padding(horizontal = 8.dp)
+            .graphicsLayer {
+                translationX = if (isBack) travelPx - 28f else 28f - travelPx
+                scaleX = scale
+                scaleY = scale
+                alpha = (smoothProgress * 1.4f).coerceIn(0f, 1f)
+            }
+            .size(44.dp),
+        shape = CircleShape,
+        color = if (armed) frost.activePillContainer else frost.islandSurface,
+        border = BorderStroke(1.dp, if (armed) frost.accent else frost.islandBorder),
+        shadowElevation = 8.dp,
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = if (isBack) Icons.AutoMirrored.Rounded.ArrowBack else Icons.AutoMirrored.Rounded.ArrowForward,
+                contentDescription = str(if (isBack) R.string.back else R.string.forward),
+                modifier = Modifier.size(20.dp),
+                tint = if (armed) frost.accent else frost.islandPrimaryText,
+            )
         }
     }
 }

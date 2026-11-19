@@ -142,7 +142,12 @@ class EddyWebViewClient(
     }
 
     override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+        val eddy = view as? EddyWebView
+        if (eddy?.isDestroyed == true) return
         if (url.startsWith(ERROR_SCHEME) || (tab.popup && blockAdNavigation(view, url))) return
+        if (eddy != null && eddy.failedDarkModePageKey != WebsiteDarkMode.pageKey(url)) {
+            eddy.failedDarkModePageKey = null
+        }
         tab.pageHost = UrlUtils.host(url)
         val newPage = tab.url != url
         tab.url = url
@@ -157,10 +162,17 @@ class EddyWebViewClient(
     }
 
     override fun onPageCommitVisible(view: WebView, url: String) {
+        val eddy = view as? EddyWebView
+        if (eddy?.isDestroyed == true) return
         tab.painted = true
+        if (eddy != null && !url.startsWith(ERROR_SCHEME)) {
+            factory.syncWebsiteDarkMode(tab, eddy, url)
+        }
     }
 
     override fun onPageFinished(view: WebView, url: String) {
+        val eddy = view as? EddyWebView
+        if (eddy?.isDestroyed == true) return
         tab.painted = true // fallback for loads that never report a visible commit
         if (url.startsWith(ERROR_SCHEME)) return
         tab.isLoading = false
@@ -181,9 +193,10 @@ class EddyWebViewClient(
                 tab.readerAvailable = ok
             }
         } else if (tab.error == null) {
+            if (eddy != null) factory.syncWebsiteDarkMode(tab, eddy, url)
             val checkedUrl = url
             ReaderMode.checkAvailability(view.context, view, checkedUrl) { available ->
-                if (tab.url == checkedUrl && tab.error == null) {
+                if (eddy?.isDestroyed != true && tab.url == checkedUrl && tab.error == null) {
                     tab.readerAvailable = available
                 }
             }
@@ -192,20 +205,25 @@ class EddyWebViewClient(
     }
 
     override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
-        if (url.startsWith(ERROR_SCHEME)) return
+        val eddy = view as? EddyWebView
+        if (eddy?.isDestroyed == true || url.startsWith(ERROR_SCHEME)) return
         val changed = tab.url != url
         tab.url = url
         if (tab.error == null) tab.security = securityFor(url)
         syncNav(view)
         if (changed && !isReload && !tab.isLoading && !tab.readerActive && tab.error == null) {
+            if (eddy != null) factory.syncWebsiteDarkMode(tab, eddy, url)
             tab.readerAvailable = false
-            view.postDelayed({
-                if (tab.url == url && !tab.isLoading && tab.error == null && !tab.readerActive) {
+            val checkAvailability = {
+                if (eddy?.isDestroyed != true && tab.url == url && !tab.isLoading && tab.error == null && !tab.readerActive) {
                     ReaderMode.checkAvailability(view.context, view, url) { available ->
-                        if (tab.url == url && tab.error == null) tab.readerAvailable = available
+                        if (eddy?.isDestroyed != true && tab.url == url && tab.error == null) {
+                            tab.readerAvailable = available
+                        }
                     }
                 }
-            }, 450)
+            }
+            if (eddy != null) eddy.postSafeDelayed(450L, checkAvailability) else view.postDelayed(checkAvailability, 450L)
         }
     }
 
@@ -269,6 +287,15 @@ class EddyWebViewClient(
     }
 
     override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+        collectWebViewCrashReport(
+            tab = tab,
+            viewUrl = view.url,
+            didCrash = detail.didCrash(),
+            rendererPriorityAtExit = detail.rendererPriorityAtExit(),
+            darkModeEnabled = host.settings.darkenPages,
+            failedDarkModePageKey = (view as? EddyWebView)?.failedDarkModePageKey,
+        )
+        (view.parent as? android.view.ViewGroup)?.removeView(view)
         host.onRenderGone(tab)
         return true
     }

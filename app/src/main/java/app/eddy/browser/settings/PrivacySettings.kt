@@ -176,6 +176,7 @@ private fun label(f: SiteFeature) = when (f) {
     SiteFeature.DESKTOP -> str(R.string.feature_desktop_site)
     SiteFeature.CONTENT_BLOCKING -> str(R.string.feature_blocking)
     SiteFeature.TEXT_ZOOM -> str(R.string.feature_text_size)
+    SiteFeature.DARKEN -> str(R.string.darken_websites)
 }
 
 @Composable

@@ -5,23 +5,31 @@ import app.eddy.browser.util.plural
 import app.eddy.browser.util.str
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +38,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -67,6 +76,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -83,10 +93,15 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -108,8 +123,10 @@ import app.eddy.browser.ui.animation.rememberHaptics
 import app.eddy.browser.ui.animation.spatialSpring
 import app.eddy.browser.ui.components.EddyIconButton
 import app.eddy.browser.ui.components.SiteIcon
+import app.eddy.browser.ui.sakuga.SakugaAnimationController
 import app.eddy.browser.ui.sakuga.SakugaEffectType
 import app.eddy.browser.ui.sakuga.SakugaPhysics
+import app.eddy.browser.ui.sakuga.SakugaSpringType
 import app.eddy.browser.ui.sakuga.rememberSakugaColors
 import app.eddy.browser.ui.sakuga.rememberSakugaController
 import app.eddy.browser.ui.sakuga.sakugaOverlay
@@ -123,34 +140,37 @@ import app.eddy.browser.util.UrlUtils
 
 /**
  * Floating frost-glass WebView control bar: Home coin, flexible URL capsule, Tab switcher coin,
- * and 3-dot Menu coin. Shrinks to a slim centered domain pill when scrolled.
+ * and 3-dot Menu coin. Morphs smoothly into a slim Dynamic Island capsule on scroll down and
+ * auto-hides cleanly after inactivity.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun BrowserBar(
     tab: BrowserTab?,
     tabCount: Int,
-    compact: Boolean,
+    headerMode: HeaderMode,
     onHome: () -> Unit,
     onEdit: () -> Unit,
     onExpand: () -> Unit,
+    onToggleHide: () -> Unit,
+    onHeaderTouchChanged: (Boolean) -> Unit,
     onSiteInfo: () -> Unit,
     onStop: () -> Unit,
     onTabs: () -> Unit,
     onMenu: () -> Unit,
     modifier: Modifier = Modifier,
+    swipeModifier: Modifier = Modifier,
     onToggleReader: () -> Unit = {},
     overrideFrostColors: FrostHeaderColors? = null,
 ) {
     val reduced = LocalReducedMotion.current
-    val progress by animateFloatAsState(
-        targetValue = if (tab?.isLoading == true) tab.progress / 100f else 0f,
-        animationSpec = effectSpring(),
-        label = "progress",
-    )
+    val haptics = rememberHaptics()
+    val density = LocalDensity.current
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val defaultFrost = rememberFrostHeaderColors(isDark)
     val frost = overrideFrostColors ?: defaultFrost
     val home = tab == null || tab.isHome
+    val isHidden = headerMode == HeaderMode.HIDDEN
     val showReaderToggle = tab != null && !home && !tab.isLoading && tab.error == null && (tab.readerAvailable || tab.readerActive)
     val label = when {
         tab == null || tab.isHome -> str(R.string.search_or_type_url)
@@ -158,78 +178,153 @@ fun BrowserBar(
         tab.host.isNotEmpty() -> tab.host
         else -> tab.url.ifEmpty { str(R.string.search_or_type_url) }
     }
+    val compactLabel = when {
+        tab == null || tab.isHome -> str(R.string.search_or_type_url)
+        tab.error != null -> UrlUtils.compactDomain(tab.url, str(R.string.page_unavailable))
+        else -> UrlUtils.compactDomain(tab.url, label).ifEmpty { label }
+    }
+
+    // Track expanded-vs-pill representation separately from HIDDEN so hiding collapses directly into top origin.
+    var lastVisibleIsCompact by remember { mutableStateOf(false) }
+    LaunchedEffect(headerMode) {
+        when (headerMode) {
+            HeaderMode.EXPANDED -> lastVisibleIsCompact = false
+            HeaderMode.COMPACT -> lastVisibleIsCompact = true
+            HeaderMode.HIDDEN -> Unit
+        }
+    }
+    val isCompactLayout = when (headerMode) {
+        HeaderMode.EXPANDED -> false
+        HeaderMode.COMPACT -> true
+        HeaderMode.HIDDEN -> lastVisibleIsCompact
+    }
+
+    val slideDistancePx = with(density) { 44.dp.toPx() }
+    val motionSpring = SakugaAnimationController.springSpec<Float>(SakugaSpringType.PREMIUM, reduced)
+    val hiddenAlpha by animateFloatAsState(
+        targetValue = if (isHidden) 0f else 1f,
+        animationSpec = if (reduced) snap() else tween(if (isHidden) 170 else 210, easing = FastOutSlowInEasing),
+        label = "headerHiddenAlpha",
+    )
+    val hiddenScaleX by animateFloatAsState(
+        targetValue = if (isHidden) (if (isCompactLayout) 0.74f else 0.90f) else 1f,
+        animationSpec = motionSpring,
+        label = "headerHiddenScaleX",
+    )
+    val hiddenScaleY by animateFloatAsState(
+        targetValue = if (isHidden) (if (isCompactLayout) 0.68f else 0.84f) else 1f,
+        animationSpec = motionSpring,
+        label = "headerHiddenScaleY",
+    )
+    val hiddenTranslationY by animateFloatAsState(
+        targetValue = if (isHidden) -slideDistancePx else 0f,
+        animationSpec = motionSpring,
+        label = "headerHiddenTranslationY",
+    )
+
+    DisposableEffect(Unit) {
+        onDispose { onHeaderTouchChanged(false) }
+    }
+
+    val touchPauseObserver = Modifier.pointerInput(isHidden) {
+        if (isHidden) return@pointerInput
+        awaitPointerEventScope {
+            var active = false
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val pressedNow = event.changes.any { it.pressed }
+                if (pressedNow != active) {
+                    active = pressedNow
+                    onHeaderTouchChanged(pressedNow)
+                }
+            }
+        }
+    }
+
+    val visibilityLayer = Modifier.graphicsLayer {
+        alpha = hiddenAlpha
+        scaleX = hiddenScaleX
+        scaleY = hiddenScaleY
+        translationY = hiddenTranslationY
+        transformOrigin = TransformOrigin(0.5f, 0f)
+    }
+
+    if (hiddenAlpha <= 0.005f && isHidden) {
+        return
+    }
 
     AnimatedContent(
-        targetState = compact,
-        modifier = modifier.fillMaxWidth(),
+        targetState = isCompactLayout,
+        modifier = modifier
+            .fillMaxWidth()
+            .then(visibilityLayer)
+            .then(touchPauseObserver),
         transitionSpec = {
-            val dur = if (reduced) 0 else 220
-            (fadeIn(tween(dur, easing = FastOutSlowInEasing)) +
-                scaleIn(tween(dur, easing = FastOutSlowInEasing), initialScale = 0.96f)) togetherWith
-                (fadeOut(tween(if (reduced) 0 else 160)) +
-                    scaleOut(tween(if (reduced) 0 else 160), targetScale = 0.96f))
+            if (reduced) {
+                (fadeIn(snap()) togetherWith fadeOut(snap()))
+                    .using(SizeTransform(clip = false) { _, _ -> snap() })
+            } else {
+                val scaleSpring = spring<Float>(
+                    dampingRatio = 0.84f,
+                    stiffness = 440f,
+                )
+                val origin = TransformOrigin(0.5f, 0f)
+                val enter = if (targetState) {
+                    fadeIn(tween(180, delayMillis = 20, easing = FastOutSlowInEasing)) +
+                        scaleIn(scaleSpring, initialScale = 1.08f, transformOrigin = origin)
+                } else {
+                    fadeIn(tween(200, easing = FastOutSlowInEasing)) +
+                        scaleIn(scaleSpring, initialScale = 0.84f, transformOrigin = origin) +
+                        expandVertically(
+                            spring(dampingRatio = 0.86f, stiffness = 420f),
+                            expandFrom = Alignment.Top,
+                        )
+                }
+                val exit = if (targetState) {
+                    fadeOut(tween(130, easing = FastOutSlowInEasing)) +
+                        scaleOut(tween(150, easing = FastOutSlowInEasing), targetScale = 0.80f, transformOrigin = origin)
+                } else {
+                    fadeOut(tween(120, easing = FastOutSlowInEasing)) +
+                        scaleOut(tween(140, easing = FastOutSlowInEasing), targetScale = 0.90f, transformOrigin = origin) +
+                        shrinkVertically(tween(140, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top)
+                }
+                (enter togetherWith exit).using(SizeTransform(clip = false))
+            }
         },
         label = "browserBarMode",
     ) { isCompact ->
         if (isCompact) {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Surface(
-                    modifier = Modifier
-                        .heightIn(min = Dimens.omniboxHeightCompact)
-                        .widthIn(min = 120.dp, max = 240.dp)
-                        .clip(CircleShape)
-                        .clickable(
-                            role = Role.Button,
-                            onClickLabel = str(R.string.show_toolbar),
-                            onClick = onExpand,
-                        )
-                        .testTag("header_compact_pill"),
-                    shape = CircleShape,
-                    color = frost.capsuleSurface,
-                    border = BorderStroke(1.dp, frost.border),
-                    shadowElevation = 4.dp,
-                ) {
-                    Box(
-                        Modifier
-                            .drawWithContent {
-                                drawContent()
-                                drawRect(
-                                    color = frost.topHighlight,
-                                    topLeft = Offset.Zero,
-                                    size = Size(size.width, 1.dp.toPx()),
-                                )
-                                if (progress > 0f && progress < 1f) {
-                                    val barW = size.width * progress
-                                    drawRect(
-                                        color = frost.accent,
-                                        topLeft = Offset(0f, size.height - 2.5.dp.toPx()),
-                                        size = Size(barW, 2.5.dp.toPx()),
-                                    )
-                                    if (!reduced) {
-                                        drawCircle(
-                                            color = Color.White.copy(alpha = 0.85f),
-                                            radius = 2.5.dp.toPx(),
-                                            center = Offset(barW, size.height - 1.25.dp.toPx()),
-                                        )
-                                    }
-                                }
-                            }
-                            .padding(horizontal = 16.dp, vertical = 6.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = frost.primaryText,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
+                CompactDynamicIslandPill(
+                    tab = tab,
+                    domainLabel = compactLabel,
+                    frost = frost,
+                    interactive = !isHidden,
+                    onExpand = onExpand,
+                    onDoubleTapHide = {
+                        haptics.tick()
+                        onToggleHide()
+                    },
+                    modifier = if (isHidden) Modifier else swipeModifier,
+                )
             }
         } else {
+            val expandedSource = remember { MutableInteractionSource() }
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (isHidden) Modifier else swipeModifier)
+                    .combinedClickable(
+                        enabled = !isHidden,
+                        interactionSource = expandedSource,
+                        indication = null,
+                        onClick = {},
+                        onDoubleClick = {
+                            haptics.tick()
+                            onToggleHide()
+                        },
+                    )
+                    .testTag("header_expanded_bar"),
                 horizontalArrangement = Arrangement.spacedBy(Dimens.headerElementGap),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -238,7 +333,6 @@ fun BrowserBar(
                     tab = tab,
                     label = label,
                     home = home,
-                    progress = progress,
                     showReaderToggle = showReaderToggle,
                     frost = frost,
                     onEdit = onEdit,
@@ -254,6 +348,175 @@ fun BrowserBar(
                     onClick = onTabs,
                 )
                 MenuCoinButton(frost = frost, onClick = onMenu)
+            }
+        }
+    }
+}
+
+/** Dynamic Island-inspired compact frosted pill shown while scrolling down. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun CompactDynamicIslandPill(
+    tab: BrowserTab?,
+    domainLabel: String,
+    frost: FrostHeaderColors,
+    interactive: Boolean,
+    onExpand: () -> Unit,
+    onDoubleTapHide: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val reduced = LocalReducedMotion.current
+    val haptics = rememberHaptics()
+    val controller = rememberSakugaController()
+    val sakugaColors = rememberSakugaColors()
+    val source = remember { MutableInteractionSource() }
+    val loading = tab?.isLoading == true && tab.error == null
+    val animatedProgress by animateFloatAsState(
+        targetValue = if (loading) tab!!.progress.coerceIn(6, 100) / 100f else 0f,
+        animationSpec = tween(if (reduced) 0 else 220, easing = FastOutSlowInEasing),
+        label = "islandLoadingProgress",
+    )
+
+    Box(
+        modifier = modifier
+            .heightIn(min = Dimens.touchTarget)
+            .sakugaOverlay(controller)
+            .combinedClickable(
+                enabled = interactive,
+                interactionSource = source,
+                indication = null,
+                role = Role.Button,
+                onClickLabel = str(R.string.show_toolbar),
+                onLongClickLabel = str(R.string.hide_toolbar),
+                onClick = {
+                    controller.emitCenter(SakugaEffectType.SUBTLE_POP, sakugaColors, intensity = 0.75f)
+                    haptics.tick()
+                    onExpand()
+                },
+                onDoubleClick = onDoubleTapHide,
+            )
+            .testTag("header_compact_pill"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Surface(
+            modifier = Modifier
+                .height(Dimens.omniboxHeightCompact)
+                .widthIn(min = 132.dp, max = 240.dp)
+                .animateContentSize(
+                    animationSpec = if (reduced) snap() else spring(dampingRatio = 0.84f, stiffness = 430f),
+                )
+                .sakugaPressSquash(
+                    interactionSource = source,
+                    pressX = SakugaPhysics.PRESS_CARD_SCALE_X,
+                    pressY = SakugaPhysics.PRESS_CARD_SCALE_Y,
+                ),
+            shape = CircleShape,
+            color = frost.islandSurface,
+            border = BorderStroke(1.dp, frost.islandBorder),
+            shadowElevation = 10.dp,
+        ) {
+            Box(
+                Modifier
+                    .clip(CircleShape)
+                    .drawWithContent {
+                        drawContent()
+                        // Specular frost edge along the top rim
+                        drawRect(
+                            color = frost.islandTopHighlight,
+                            topLeft = Offset.Zero,
+                            size = Size(size.width, 1.dp.toPx()),
+                        )
+                        // Subtle bottom progress filament while the page is loading
+                        if (loading && animatedProgress > 0.01f) {
+                            val barH = 2.dp.toPx()
+                            val barW = size.width * animatedProgress.coerceIn(0f, 1f)
+                            drawRect(
+                                color = frost.accent.copy(alpha = 0.22f),
+                                topLeft = Offset(0f, size.height - barH),
+                                size = Size(size.width, barH),
+                            )
+                            drawRect(
+                                brush = Brush.horizontalGradient(
+                                    colors = listOf(
+                                        frost.accent.copy(alpha = 0.75f),
+                                        frost.accent,
+                                    ),
+                                    startX = 0f,
+                                    endX = barW,
+                                ),
+                                topLeft = Offset(0f, size.height - barH),
+                                size = Size(barW, barH),
+                            )
+                        }
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
+                    Modifier.padding(start = 10.dp, end = 14.dp, top = 4.dp, bottom = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    when {
+                        tab?.error != null || tab?.security == Security.ERROR -> {
+                            Icon(
+                                imageVector = Icons.Rounded.GppBad,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                        tab?.security == Security.INSECURE -> {
+                            Icon(
+                                imageVector = Icons.Rounded.Warning,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                        tab != null && !tab.isHome -> {
+                            if (tab.favicon != null) {
+                                SiteIcon(
+                                    host = tab.host.ifEmpty { domainLabel },
+                                    size = 18.dp,
+                                    live = tab.favicon,
+                                    fetch = false,
+                                    shape = CircleShape,
+                                    background = Color.White.copy(alpha = 0.14f),
+                                )
+                            } else {
+                                Box(
+                                    Modifier
+                                        .size(18.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.White.copy(alpha = 0.14f)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Public,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(12.dp),
+                                        tint = frost.islandSecondaryText,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Text(
+                        text = domainLabel,
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
+                        color = frost.islandPrimaryText,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (tab?.incognito == true) {
+                        Icon(
+                            imageVector = Icons.Rounded.VisibilityOff,
+                            contentDescription = str(R.string.shortcut_incognito),
+                            modifier = Modifier.size(14.dp),
+                            tint = frost.accent,
+                        )
+                    }
+                }
             }
         }
     }
@@ -439,7 +702,6 @@ private fun UrlCapsule(
     tab: BrowserTab?,
     label: String,
     home: Boolean,
-    progress: Float,
     showReaderToggle: Boolean,
     frost: FrostHeaderColors,
     onEdit: () -> Unit,
@@ -489,21 +751,6 @@ private fun UrlCapsule(
                         topLeft = Offset.Zero,
                         size = Size(size.width, 1.dp.toPx()),
                     )
-                    if (progress > 0f && progress < 1f) {
-                        val barW = size.width * progress
-                        drawRect(
-                            color = frost.accent,
-                            topLeft = Offset(0f, size.height - 2.5.dp.toPx()),
-                            size = Size(barW, 2.5.dp.toPx()),
-                        )
-                        if (!reduced) {
-                            drawCircle(
-                                color = Color.White.copy(alpha = 0.85f),
-                                radius = 2.5.dp.toPx(),
-                                center = Offset(barW, size.height - 1.25.dp.toPx()),
-                            )
-                        }
-                    }
                 },
         ) {
             Row(

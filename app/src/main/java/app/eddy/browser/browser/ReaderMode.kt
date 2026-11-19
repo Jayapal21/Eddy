@@ -36,6 +36,15 @@ object ReaderMode {
         return scale == 0f
     }
 
+    private fun evalJs(view: WebView, script: String, callback: ((String?) -> Unit)? = null) {
+        val eddy = view as? EddyWebView
+        if (eddy != null) {
+            eddy.safeEvaluateJavascript(script, callback)
+        } else {
+            runCatching { view.evaluateJavascript(script, callback) }.onFailure { callback?.invoke(null) }
+        }
+    }
+
     /**
      * Non-destructively detects whether the current document is a compatible article for Reader Mode.
      * Runs Readability on a clone of the document without altering the live page.
@@ -59,7 +68,7 @@ object ReaderMode {
             var blocks=document.querySelectorAll('p, article, blockquote, pre').length;
             return blocks>=2||cleanLen>=400;
         })()"""
-        view.evaluateJavascript(js) { onResult(it == "true") }
+        evalJs(view, js) { onResult(it == "true") }
     }
 
     internal fun isCandidateUrl(url: String): Boolean {
@@ -92,7 +101,7 @@ object ReaderMode {
 
     /** Smoothly updates the live Reader Mode stylesheet variables without reloading or reflowing. */
     fun applyTheme(view: WebView, theme: ReaderThemeMode, reducedMotion: Boolean = false) {
-        view.evaluateJavascript(buildApplyThemeJs(theme, reducedMotion), null)
+        evalJs(view, buildApplyThemeJs(theme, reducedMotion), null)
     }
 
     internal fun readerStylesheetCss(theme: ReaderThemeMode): String {
@@ -155,6 +164,17 @@ object ReaderMode {
             var article=null;
             try{ article=new Readability(document.cloneNode(true)).parse(); }catch(e){}
             if(!article||!article.content) return false;
+            if(window.__eddyDarkState){
+                window.__eddyDarkState.enabled=false;
+                window.__eddyDarkState.tornDown=true;
+                if(window.__eddyDarkState.timer){clearTimeout(window.__eddyDarkState.timer);window.__eddyDarkState.timer=null;}
+                if(window.__eddyDarkState.observer){try{window.__eddyDarkState.observer.disconnect();}catch(e){}window.__eddyDarkState.observer=null;}
+                if(window.__eddyDarkState.pending) window.__eddyDarkState.pending.length=0;
+            }
+            if(document.documentElement){
+                document.documentElement.removeAttribute('${WebsiteDarkMode.ROOT_ATTR}');
+                document.documentElement.removeAttribute('${WebsiteDarkMode.NATIVE_ATTR}');
+            }
             window.__eddyReader=true;
 
             var reader=document.createElement('article');
@@ -272,7 +292,7 @@ object ReaderMode {
             window.scrollTo(0,0);
             return true;
         })()"""
-        view.evaluateJavascript(js) { onResult(it == "true") }
+        evalJs(view, js) { onResult(it == "true") }
     }
 
     /** Extracts clean article text from an active Reader Mode article for TTS playback. */
@@ -302,7 +322,7 @@ object ReaderMode {
     })()"""
 
     fun extractTtsText(view: WebView, onResult: (String) -> Unit) {
-        view.evaluateJavascript(buildExtractTtsTextJs()) { raw ->
+        evalJs(view, buildExtractTtsTextJs()) { raw ->
             val text = runCatching { JSONArray("[$raw]").getString(0) }.getOrNull().orEmpty()
             onResult(text)
         }
@@ -379,7 +399,7 @@ object ReaderMode {
     }
 
     fun extractArticle(view: WebView, pageUrl: String, onResult: (ExtractedReaderArticle?) -> Unit) {
-        view.evaluateJavascript(buildExtractArticleJs(pageUrl)) { raw ->
+        evalJs(view, buildExtractArticleJs(pageUrl)) { raw ->
             onResult(parseExtractedArticleJson(raw, pageUrl))
         }
     }

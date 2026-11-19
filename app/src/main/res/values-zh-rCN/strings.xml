@@ -664,13 +664,10 @@
     <string name="web_debugging_hint">允许 chrome://inspect 通过 USB 连接到页面</string>
     <string name="skipped_suffix">，跳过 %1$s 个</string>
     <string name="voice_search">语音搜索</string>
-    <string name="discord_title">Eddy 有 Discord 了</string>
-    <string name="discord_message">加入全新的 Eddy Discord 服务器，与其他用户交流、报告错误、建议新功能，并第一时间了解新版本。</string>
     <!-- Folder under fastlane/metadata/android that holds this language's changelogs. -->
     <string name="blocking_off_for_site">已对此网站关闭广告和跟踪器拦截</string>
     <string name="changelog_locale">zh-CN</string>
     <string name="changelog_title">新功能</string>
-    <string name="discord_join">加入</string>
     <string name="the_certificate_is_untrusted">此证书不是由受信任的机构颁发的。</string>
     <string name="feature_location">位置</string>
     <string name="feature_camera">相机</string>

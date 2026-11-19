@@ -122,7 +122,7 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
     private var sitesInitialized = false
     override val sites by lazy(LazyThreadSafetyMode.NONE) { sitesInitialized = true; container.sites }
     override val favicons by lazy(LazyThreadSafetyMode.NONE) { container.favicons }
-    override var pageBackground: Int = 0xFF000000.toInt()
+    override var pageBackground: Int = 0xFF080B0D.toInt()
         private set
 
     val history by lazy(LazyThreadSafetyMode.NONE) { container.history }
@@ -164,7 +164,12 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
     /** The home-screen widget's mic opened the omnibox: start dictating as soon as it shows. */
     var dictateOnOpen by mutableStateOf(false)
         private set
-    var chromeVisible by mutableStateOf(true)
+    val headerController = AdaptiveHeaderController(viewModelScope)
+    val headerMode: HeaderMode get() = headerController.mode
+    val chromeVisible: Boolean get() = headerMode == HeaderMode.EXPANDED
+    var edgeSwipeDirection by mutableIntStateOf(0)
+        private set
+    var edgeSwipeProgress by mutableFloatStateOf(0f)
         private set
     /** Hides the system bars and the toolbar. Scrolling up still brings the toolbar back; Back leaves full screen. */
     var fullscreen by mutableStateOf(false)
@@ -253,8 +258,6 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
     }
     private val ready = CompletableDeferred<Unit>()
     private var suggestJob: Job? = null
-    private var scrollAccum = 0
-    private var ignoreScrollUntil = 0L
     private var deferredInitStarted = false
     private var networkCallbackRegistered = false
 
@@ -271,7 +274,7 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
         // Find belongs to the page it searched; switching tabs closes it instead of showing that page's count here.
         viewModelScope.launch { snapshotFlow { tabs.selectedId }.collect { id -> if (find != null && find?.tabId != id) closeFind() } }
         // ponytail: top-level documents only; media inside cross-origin iframes (embedded players) keeps playing.
-        MediaService.pauseAll = { tabs.tabs.forEach { it.webView?.evaluateJavascript("document.querySelectorAll('video,audio').forEach(m => m.pause())", null) } }
+        MediaService.pauseAll = { tabs.tabs.forEach { it.webView?.safeEvaluateJavascript("document.querySelectorAll('video,audio').forEach(m => m.pause())", null) } }
         viewModelScope.launch {
             // The last session ended without the swipe cleanup running (the system had stopped its service).
             if (settings.clearOnExit && withContext(Dispatchers.IO) { ExitCleanup.pending(app) }) {
@@ -283,7 +286,13 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
         }
         viewModelScope.launch {
             settingsState.collect { s ->
-                tabs.tabs.forEach { t -> t.webView?.let { factory.applyGlobal(it, s); factory.prepare(t, it, t.url) } }
+                tabs.tabs.forEach { t ->
+                    t.webView?.let {
+                        factory.applyGlobal(it, s)
+                        factory.prepare(t, it, t.url)
+                        factory.syncWebsiteDarkMode(t, it, t.url)
+                    }
+                }
             }
         }
         viewModelScope.launch {
@@ -291,9 +300,11 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
             settingsState.map { it.filterLists }.distinctUntilChanged().drop(1).collect { blocker.reload(it) }
         }
         viewModelScope.launch {
-            snapshotFlow { tabs.selected?.url }.distinctUntilChanged().collect {
-                chromeVisible = true
+            snapshotFlow { tabs.selectedId to (tabs.selected?.isHome == true) }.distinctUntilChanged().collect {
+                headerController.onTabOrNavigationReset()
                 autofillOffer = null
+                edgeSwipeDirection = 0
+                edgeSwipeProgress = 0f
                 if (ttsState != TtsState.IDLE) stopReading()
             }
         }
@@ -361,7 +372,7 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
         tabs.load(tab, url)
         screen = Screen.BROWSER
         stopEditing(navigating = true)
-        chromeVisible = true
+        headerController.onTabOrNavigationReset()
     }
 
     fun openInNewTab(url: String, incognito: Boolean = false, select: Boolean = true) {
@@ -428,7 +439,12 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
 
     fun reloadOrStop() {
         val tab = tabs.selected ?: return
-        if (tab.isLoading && tab.error == null) tab.webView?.stopLoading() else reload()
+        if (tab.isLoading && tab.error == null) {
+            tab.webView?.stopLoading()
+            tab.isLoading = false
+        } else {
+            reload()
+        }
     }
 
     fun reload() {
@@ -473,7 +489,15 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
         if (tab.canGoBack) goBack() else tabs.showHome(tab)
     }
 
-    fun goHome() { tabs.selected?.let(tabs::showHome) }
+    fun goHome() {
+        closeFind()
+        stopEditing()
+        autofillOffer = null
+        edgeSwipeDirection = 0
+        edgeSwipeProgress = 0f
+        tabs.selected?.let(tabs::showHome)
+        headerController.onTabOrNavigationReset()
+    }
 
     /** Back-gesture priority chain; returns false when nothing is left to undo (the app may then exit). */
     fun onBack(): Boolean {
@@ -512,7 +536,7 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
         val url = tab?.url?.takeIf { UrlUtils.isWebUrl(it) }.orEmpty()
         omniboxText = url
         editing = true
-        chromeVisible = true
+        headerController.expand()
         suggestJob?.cancel()
         suggestions.value = emptyList()
         loadClipboardSuggestion()
@@ -533,6 +557,7 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
     /** [navigating]: a load just started, which takes over a matching prerender, so leave it alone. */
     fun stopEditing(navigating: Boolean = false) {
         editing = false
+        omniboxText = ""
         dictateOnOpen = false
         suggestJob?.cancel()
         suggestions.value = emptyList()
@@ -580,33 +605,46 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
 
     override fun onScrolled(tab: BrowserTab, dy: Int, scrollY: Int) {
         if (tab.id != tabs.selectedId || editing || find != null) return
-        if (System.currentTimeMillis() < ignoreScrollUntil) return
-        if (scrollY <= 8) { setChrome(true); scrollAccum = 0; return }
-        if (dy == 0) return
-        // Restart the accumulator when the direction flips so small jitters never toggle the chrome.
-        if (dy > 0 != scrollAccum > 0) scrollAccum = 0
-        scrollAccum += dy
-        if (scrollAccum > SCROLL_THRESHOLD) setChrome(false) else if (scrollAccum < -SCROLL_THRESHOLD) setChrome(true)
+        headerController.onScroll(
+            dy = dy,
+            scrollY = scrollY,
+            isHome = tab.isHome,
+            scrollBlockedByUi = editing || find != null,
+            isPullRefreshing = tab.pullDistance > 0 || tab.refreshing,
+        )
     }
 
-    private fun setChrome(visible: Boolean) {
-        if (chromeVisible == visible) return
-        chromeVisible = visible
-        scrollAccum = 0
-        ignoreScrollUntil = System.currentTimeMillis() + 450
+    override fun onEdgeSwipe(tab: BrowserTab, direction: Int, progress: Float) {
+        if (tab.id != tabs.selectedId || tab.isHome) return
+        edgeSwipeDirection = direction
+        edgeSwipeProgress = progress
     }
 
-    fun showChrome() = setChrome(true)
+    override fun onEdgeSwipeRelease(tab: BrowserTab, direction: Int, commit: Boolean) {
+        if (tab.id == tabs.selectedId && commit) {
+            if (direction < 0) goBack() else if (direction > 0) goForward()
+        }
+        edgeSwipeDirection = 0
+        edgeSwipeProgress = 0f
+    }
+
+    fun showChrome() = headerController.expand()
+
+    fun toggleHeaderManual() = headerController.toggleManualVisibility()
+
+    fun setHeaderTouched(touching: Boolean) = headerController.onHeaderTouchChanged(touching)
+
+    fun syncHeaderBlockers(state: HeaderInteractionState) = headerController.syncUiBlockers(state)
 
     fun toggleFullscreen() {
         fullscreen = !fullscreen
-        setChrome(!fullscreen)
+        headerController.onFullscreenChanged(fullscreen)
         if (fullscreen) snackbar(str(R.string.full_screen_hint))
     }
 
     // ---- find in page ---------------------------------------------------------------------
 
-    fun openFind() { find = FindState(tabs.selectedId); menuVisible = false; chromeVisible = true }
+    fun openFind() { find = FindState(tabs.selectedId); menuVisible = false; headerController.expand() }
 
     fun findQuery(q: String) {
         val state = find ?: return
@@ -696,7 +734,7 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
 
     /** Sets the main frame's media directly; the posted message reaches iframes through WebViewFactory's speed script. */
     fun setPlaybackSpeed(rate: Double) {
-        tabs.selected?.webView?.evaluateJavascript(
+        tabs.selected?.webView?.safeEvaluateJavascript(
             "document.querySelectorAll('video,audio').forEach(function(m){m.playbackRate=$rate});" +
                 "for(var i=0;i<frames.length;i++)frames[i].postMessage({eddySpeed:$rate},'*')",
             null,
@@ -816,7 +854,7 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
             tabs.select(target)
             screen = Screen.BROWSER
             stopEditing(navigating = true)
-            chromeVisible = true
+            headerController.onTabOrNavigationReset()
         }
     }
 
@@ -893,7 +931,13 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
         sites.set(host, feature, value, tab.incognito)
         // A reload keeps the URL, so onPageStarted would carry the old count over to the new blocking state.
         if (feature == SiteFeature.CONTENT_BLOCKING) { tab.blockedRaw = 0; tab.blockedCount = 0 }
-        tab.webView?.let { factory.prepare(tab, it, tab.url) }
+        if (feature == SiteFeature.DARKEN && value != SiteSettings.BLOCK) {
+            tab.webView?.failedDarkModePageKey = null
+        }
+        tab.webView?.let {
+            factory.prepare(tab, it, tab.url)
+            if (feature == SiteFeature.DARKEN) factory.syncWebsiteDarkMode(tab, it, tab.url)
+        }
         if (feature == SiteFeature.JAVASCRIPT || feature == SiteFeature.CONTENT_BLOCKING || feature == SiteFeature.THIRD_PARTY_COOKIES) {
             tab.webView?.reload()
         }
@@ -1004,11 +1048,13 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
         val view = tab.webView ?: return
         // ponytail: the live DOM, not the raw response, so script changes show; fetch the URL if exact bytes matter.
         val js = "(document.doctype?new XMLSerializer().serializeToString(document.doctype)+'\\n':'')+document.documentElement.outerHTML"
-        view.evaluateJavascript(js) { raw ->
-            // The ad-hiding style is ours, not the site's.
+        view.safeEvaluateJavascript(js) { raw ->
+            // Injected ad-hiding and website-dark-mode stylesheets belong to the browser chrome, not the site.
             val text = runCatching { JSONObject("{\"t\":$raw}").getString("t") }.getOrNull()
+                ?.replace("<style id=\"${WebViewFactory.COSMETIC_STYLE_ID}\">${WebViewFactory.COSMETIC_CSS}</style>", "")
                 ?.replace("<style>${WebViewFactory.COSMETIC_CSS}</style>", "")
-            if (text.isNullOrEmpty()) return@evaluateJavascript snackbar(str(R.string.could_not_read_page_source))
+                ?.replace("<style id=\"${WebsiteDarkMode.STYLE_ID}\">${WebsiteDarkMode.DARK_MODE_CSS}</style>", "")
+            if (text.isNullOrEmpty()) return@safeEvaluateJavascript snackbar(str(R.string.could_not_read_page_source))
             openSource = OpenSource(tab.url, text, Screen.BROWSER)
             screen = Screen.SOURCE
         }
@@ -1017,13 +1063,16 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
     fun viewAppLogs() {
         viewModelScope.launch {
             // An app may read its own process's logcat without any permission.
-            val text = withContext(Dispatchers.IO) {
+            val pid = android.os.Process.myPid()
+            val logcatText = withContext(Dispatchers.IO) {
                 runCatching {
-                    ProcessBuilder("logcat", "-d", "-v", "time", "--pid=${android.os.Process.myPid()}")
+                    ProcessBuilder("logcat", "-d", "-v", "time", "--pid=$pid")
                         .redirectErrorStream(true).start().inputStream.bufferedReader().use { it.readText() }
                 }.getOrNull()
-            }
-            if (text.isNullOrBlank()) return@launch snackbar(str(R.string.no_logs_to_show))
+            }.orEmpty()
+            val diagLines = WebViewDiagnostics.formatAsLogcatLines(pid)
+            val text = mergeAppLogs(logcatText, diagLines)
+            if (text.isBlank()) return@launch snackbar(str(R.string.no_logs_to_show))
             openSource = OpenSource(str(R.string.app_logs), text, screen, isLog = true)
             screen = Screen.SOURCE
         }
@@ -1098,7 +1147,7 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
         if (fromTimer && tab.isLoading) return
         val view = tab.webView ?: return
         pendingLogin = null
-        view.evaluateJavascript(AutofillScript.PASSWORD_FIELD_VISIBLE) { result ->
+        view.safeEvaluateJavascript(AutofillScript.PASSWORD_FIELD_VISIBLE) { result ->
             if (result == "false") viewModelScope.launch { offerToSave(pending) }
         }
     }
@@ -1288,7 +1337,7 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
         if (!contentDisposition.contains("filename", ignoreCase = true) && tab.webView != null) {
             // Ask the page which name the link requested (a[download]); WebView never passes it on. Read once, so it
             // cannot name a later download.
-            tab.webView?.evaluateJavascript("(function(){var n=window.__eddyDownloadName||'';window.__eddyDownloadName='';return n})()") { raw ->
+            tab.webView?.safeEvaluateJavascript("(function(){var n=window.__eddyDownloadName||'';window.__eddyDownloadName='';return n})()") { raw ->
                 val name = runCatching { JSONArray("[$raw]").getString(0) }.getOrNull().orEmpty().replace("\"", "")
                 confirmDownload(tab, url, userAgent, if (name.isNotEmpty()) "attachment; filename=\"$name\"" else contentDisposition.ifBlank { "attachment" }, mime, length)
             }
@@ -1401,6 +1450,7 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
     }
 
     override fun onCleared() {
+        headerController.dispose()
         MediaService.pauseAll = null
         if (readAloudInitialized) readAloud.release()
         if (networkCallbackRegistered) {
@@ -1416,11 +1466,37 @@ class BrowserViewModel(private val app: Application) : AndroidViewModel(app), Br
     companion object {
         private const val SUGGEST_DEBOUNCE_MS = 200L
         const val MAIN_OPEN_DOWNLOADS = "app.eddy.browser.OPEN_DOWNLOADS"
-        private const val SCROLL_THRESHOLD = 36
         private const val PENDING_CHECK_MS = 2500L
         private const val PENDING_EXPIRY_MS = 30_000L
         private const val CLIPBOARD_CLEAR_MS = 60_000L
         private const val MAX_PASSWORD_LENGTH = 256
         private const val MAX_USERNAME_LENGTH = 256
+    }
+}
+
+internal enum class ScrollChromeAction { NONE, SHOW, HIDE }
+
+/** Pure scroll hysteresis solver for the Dynamic Island adaptive browser header. */
+internal fun resolveScrollChromeAction(
+    dy: Int,
+    scrollY: Int,
+    chromeVisible: Boolean,
+    scrollAccum: Int,
+    nowMs: Long,
+    ignoreUntilMs: Long,
+    downThresholdPx: Int = 64,
+    upThresholdPx: Int = 40,
+    topRevealY: Int = 8,
+    minCollapseY: Int = 48,
+): Pair<ScrollChromeAction, Int> {
+    if (scrollY <= topRevealY) {
+        return (if (!chromeVisible) ScrollChromeAction.SHOW else ScrollChromeAction.NONE) to 0
+    }
+    if (nowMs < ignoreUntilMs || dy == 0) return ScrollChromeAction.NONE to scrollAccum
+    val nextAccum = if ((dy > 0) != (scrollAccum > 0)) dy else scrollAccum + dy
+    return when {
+        chromeVisible && scrollY >= minCollapseY && nextAccum > downThresholdPx -> ScrollChromeAction.HIDE to 0
+        !chromeVisible && nextAccum < -upThresholdPx -> ScrollChromeAction.SHOW to 0
+        else -> ScrollChromeAction.NONE to nextAccum
     }
 }

@@ -667,13 +667,10 @@
     <string name="web_debugging_hint">Позволяет chrome://inspect подключаться к страницам по USB</string>
     <string name="skipped_suffix">, пропущено: %1$s</string>
     <string name="voice_search">Голосовой поиск</string>
-    <string name="discord_title">У Eddy есть Discord</string>
-    <string name="discord_message">Присоединяйтесь к новому Discord-серверу Eddy, чтобы общаться с другими пользователями, сообщать об ошибках, предлагать функции и первыми узнавать о новых версиях.</string>
     <!-- Folder under fastlane/metadata/android that holds this language's changelogs. -->
     <string name="blocking_off_for_site">Блокировка рекламы и трекеров отключена для этого сайта</string>
     <string name="changelog_locale">ru-RU</string>
     <string name="changelog_title">Что нового</string>
-    <string name="discord_join">Присоединиться</string>
     <string name="the_certificate_is_untrusted">Этот сертификат выдан не доверенным центром сертификации.</string>
     <string name="feature_location">местоположение</string>
     <string name="feature_camera">камера</string>

@@ -29,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.eddy.browser.data.database.SiteSettings
@@ -137,6 +138,15 @@ fun SiteInfoSheet(vm: BrowserViewModel, tab: BrowserTab, onDismiss: () -> Unit) 
                     onCheckedChange = { vm.toggleDesktopForSite(); refresh++ },
                 )
             }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(str(R.string.darken_this_website), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                SakugaSwitch(
+                    checked = site?.darken != SiteSettings.BLOCK,
+                    onCheckedChange = { set(SiteFeature.DARKEN, if (it) null else SiteSettings.BLOCK) },
+                    enabled = settings.darkenPages,
+                    modifier = Modifier.testTag("site_info_darken_switch"),
+                )
+            }
             HorizontalDivider()
 
             Text(str(R.string.permissions), style = MaterialTheme.typography.titleSmall)
@@ -155,7 +165,7 @@ fun SiteInfoSheet(vm: BrowserViewModel, tab: BrowserTab, onDismiss: () -> Unit) 
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SakugaOutlinedButton(onClick = { vm.clearSiteData(tab); onDismiss() }, particlePreset = SakugaParticlePreset.DELETE) { Text(str(R.string.clear_site_data)) }
-                SakugaTextButton(onClick = { vm.sites.reset(host, tab.incognito); origin?.let { vm.sites.reset(it, tab.incognito) }; vm.setSiteSetting(tab, SiteFeature.CONTENT_BLOCKING, null); refresh++ }, enabled = site != null || permissions != null) { Text(str(R.string.reset_permissions)) }
+                SakugaTextButton(onClick = { vm.sites.reset(host, tab.incognito); origin?.let { vm.sites.reset(it, tab.incognito) }; vm.setSiteSetting(tab, SiteFeature.DARKEN, null); vm.setSiteSetting(tab, SiteFeature.CONTENT_BLOCKING, null); refresh++ }, enabled = site != null || permissions != null) { Text(str(R.string.reset_permissions)) }
             }
         }
     }

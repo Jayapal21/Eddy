@@ -665,13 +665,10 @@ Ayarlarınızı ixrac etsəniz (Ayarlar &gt; Əlavə &gt; Ayarları ixrac et), E
     <string name="web_debugging_hint">chrome://inspect-ə USB vasitəsilə səhifələrə qoşulmağa icazə verir</string>
     <string name="skipped_suffix">, %1$s ötürüldü</string>
     <string name="voice_search">Səsli axtarış</string>
-    <string name="discord_title">Eddy-nin Discord-u var</string>
-    <string name="discord_message">Digər istifadəçilərlə söhbət etmək, xəta bildirmək, funksiya təklif etmək və yeni versiyalardan ilk xəbər tutmaq üçün yeni Eddy Discord serverinə qoşulun.</string>
     <!-- Folder under fastlane/metadata/android that holds this language's changelogs. -->
     <string name="blocking_off_for_site">Bu sayt üçün reklam və izləyici bloklama deaktivdir</string>
     <string name="changelog_locale">az-AZ</string>
     <string name="changelog_title">Yeniliklər</string>
-    <string name="discord_join">Qoşul</string>
     <string name="the_certificate_is_untrusted">Bu sertifikatı etibarlı orqan verməyib.</string>
     <string name="feature_location">məkan</string>
     <string name="feature_camera">kamera</string>

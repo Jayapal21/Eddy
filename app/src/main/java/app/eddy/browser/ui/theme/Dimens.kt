@@ -11,7 +11,7 @@ object Dimens {
     val gutterLarge: Dp = 24.dp
 
     val omniboxHeight: Dp = 52.dp
-    val omniboxHeightCompact: Dp = 34.dp
+    val omniboxHeightCompact: Dp = 36.dp
     val coinSize: Dp = 42.dp
     val urlCapsuleHeight: Dp = 44.dp
     val toolbarHeight: Dp = 52.dp

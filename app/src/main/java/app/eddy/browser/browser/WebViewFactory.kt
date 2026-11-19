@@ -5,7 +5,6 @@ import app.eddy.browser.util.str
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.MutableContextWrapper
-import android.graphics.Color
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Handler
@@ -91,9 +90,9 @@ class WebViewFactory(private val appContext: Context, private val host: BrowserH
             sslPreferencesCleared = true
         }
 
-        // Pages that set no background of their own must render like they do in any browser: dark text on white.
-        // Tinting this with the app theme would make plain pages unreadable in dark mode.
-        view.setBackgroundColor(Color.WHITE)
+        // Match the browser backdrop before first paint so loading transitions and resizes never flash white,
+        // while keeping website content colors completely untouched (darkening remains user-controlled).
+        view.applyBackgroundColor(host.pageBackground)
         view.overScrollMode = View.OVER_SCROLL_NEVER
         view.isVerticalScrollBarEnabled = false
         if (tab.incognito) view.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
@@ -140,6 +139,11 @@ class WebViewFactory(private val appContext: Context, private val host: BrowserH
         view.onScrolled = { dy, y -> host.onScrolled(tab, dy, y) }
         view.onPull = { tab.pullDistance = it }
         view.onPullRelease = { if (it) { tab.refreshing = true; view.reload() } }
+        view.canSwipeEdge = { dir ->
+            if (dir < 0) view.canGoBack() else view.canGoForward()
+        }
+        view.onEdgeSwipe = { dir, progress -> host.onEdgeSwipe(tab, dir, progress) }
+        view.onEdgeSwipeRelease = { dir, commit -> host.onEdgeSwipeRelease(tab, dir, commit) }
 
         registerAutofill(tab, view)
         applyGlobal(view, host.settings)
@@ -171,10 +175,11 @@ class WebViewFactory(private val appContext: Context, private val host: BrowserH
 
     /** Settings that do not depend on the current site; also re-run when the user changes a preference. */
     fun applyGlobal(view: EddyWebView, s: Settings) {
+        if (view.isDestroyed) return
         WebView.setWebContentsDebuggingEnabled(s.webDebugging)
-        // ponytail: WebView only darkens while its theme is dark, i.e. the system is in dark mode; the in-app Dark theme does not count.
+        // Custom CSS dark mode handles light pages safely across all app/system themes without double-darkening.
         if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
-            WebSettingsCompat.setAlgorithmicDarkeningAllowed(view.settings, s.darkenPages)
+            WebSettingsCompat.setAlgorithmicDarkeningAllowed(view.settings, false)
         }
         val cookies = cookieManager(view.incognito)
         cookies.setAcceptCookie(s.cookieMode != CookieMode.BLOCK_ALL)
@@ -183,14 +188,35 @@ class WebViewFactory(private val appContext: Context, private val host: BrowserH
             if (s.doNotTrack && view.dntScript == null) {
                 view.dntScript = WebViewCompat.addDocumentStartJavaScript(view, DNT_SCRIPT, setOf("*"))
             } else if (!s.doNotTrack) {
-                view.dntScript?.remove()
+                runCatching { view.dntScript?.remove() }
                 view.dntScript = null
             }
         }
     }
 
+    /** Applies or removes custom website dark mode for [url] based on global settings, per-site opt-outs, and fallback state. */
+    fun syncWebsiteDarkMode(tab: BrowserTab, view: EddyWebView, url: String = tab.url) {
+        if (view.isDestroyed) return
+        val siteDarken = host.sites.peek(UrlUtils.displayHost(url), tab.incognito)?.darken
+        if (WebsiteDarkMode.shouldApply(host.settings.darkenPages, siteDarken, tab.readerActive, url, view.failedDarkModePageKey)) {
+            WebsiteDarkMode.applyWithDiagnostics(view, url) { failedUrl, reason ->
+                view.failedDarkModePageKey = WebsiteDarkMode.pageKey(failedUrl)
+                collectDarkModeDiagnosticError(
+                    tab = tab,
+                    pageUrl = failedUrl,
+                    reason = reason,
+                    darkModeEnabled = host.settings.darkenPages,
+                )
+                WebsiteDarkMode.remove(view)
+            }
+        } else {
+            WebsiteDarkMode.remove(view)
+        }
+    }
+
     /** Resolves site overrides for [url] and pushes them into the WebView. Cheap; safe to call per navigation. */
     fun prepare(tab: BrowserTab, view: EddyWebView, url: String) {
+        if (view.isDestroyed) return
         val s = host.settings
         val site = host.sites.peek(UrlUtils.displayHost(url), tab.incognito)
         view.settings.textZoom = site?.textZoom ?: s.textZoom
@@ -226,14 +252,14 @@ class WebViewFactory(private val appContext: Context, private val host: BrowserH
     /** Request blocking removes the ad but leaves its empty slot behind; this hides the slot too. */
     @SuppressLint("RequiresFeature")
     private fun applyCosmetic(view: EddyWebView, active: Boolean) {
-        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return
+        if (view.isDestroyed || !WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return
         if (active && view.cosmeticScript == null) {
             view.cosmeticScript = WebViewCompat.addDocumentStartJavaScript(view, COSMETIC_SCRIPT, setOf("*"))
             view.youtubeScript = WebViewCompat.addDocumentStartJavaScript(view, YOUTUBE_SCRIPT, YOUTUBE_ORIGINS)
         } else if (!active) {
-            view.cosmeticScript?.remove()
+            runCatching { view.cosmeticScript?.remove() }
             view.cosmeticScript = null
-            view.youtubeScript?.remove()
+            runCatching { view.youtubeScript?.remove() }
             view.youtubeScript = null
         }
     }
@@ -244,6 +270,7 @@ class WebViewFactory(private val appContext: Context, private val host: BrowserH
      */
     @SuppressLint("RequiresFeature")
     private fun applyDesktopExtras(view: EddyWebView, desktop: Boolean) {
+        if (view.isDestroyed) return
         if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) {
             if (mobileMeta == null) mobileMeta = UserAgents.asChrome(WebSettingsCompat.getUserAgentMetadata(view.settings))
             (if (desktop) desktopMeta else mobileMeta)?.let { WebSettingsCompat.setUserAgentMetadata(view.settings, it) }
@@ -252,7 +279,7 @@ class WebViewFactory(private val appContext: Context, private val host: BrowserH
         if (desktop && view.desktopScript == null) {
             view.desktopScript = WebViewCompat.addDocumentStartJavaScript(view, DESKTOP_VIEWPORT_SCRIPT, setOf("*"))
         } else if (!desktop) {
-            view.desktopScript?.remove()
+            runCatching { view.desktopScript?.remove() }
             view.desktopScript = null
         }
     }
@@ -369,11 +396,19 @@ class WebViewFactory(private val appContext: Context, private val host: BrowserH
         val isIncognitoIsolated: Boolean
             get() = WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)
         private fun newProfileName() = PROFILE_PREFIX + "_" + java.util.UUID.randomUUID().toString().take(8)
-        /** Rewrites viewport meta tags while the document parses, then stops watching. */
-        private const val DESKTOP_VIEWPORT_SCRIPT =
-            "(function(){if(window!==top)return;var W='width=1024';function f(){document.querySelectorAll('meta[name=viewport]')" +
-                ".forEach(function(m){if(m.content!==W)m.content=W})}var o=new MutationObserver(f);" +
-                "o.observe(document,{childList:true,subtree:true});document.addEventListener('DOMContentLoaded',function(){f();o.disconnect()})})()"
+        const val COSMETIC_STYLE_ID = "eddy-cosmetic-style"
+        /** Rewrites viewport meta tags while the document parses, then stops watching cleanly. */
+        internal const val DESKTOP_VIEWPORT_SCRIPT =
+            "(function(){try{if(window!==top)return;var W='width=1024';" +
+                "function f(){try{document.querySelectorAll('meta[name=viewport]').forEach(function(m){if(m.content!==W)m.content=W})}catch(e){}}" +
+                "if(typeof MutationObserver==='function'&&document){" +
+                "var o=new MutationObserver(f);" +
+                "var stop=function(){try{f();o.disconnect()}catch(e){}};" +
+                "o.observe(document,{childList:true,subtree:true});" +
+                "document.addEventListener('DOMContentLoaded',stop,{once:true});" +
+                "window.addEventListener('pagehide',stop,{passive:true});" +
+                "window.addEventListener('beforeunload',stop,{passive:true})}" +
+                "}catch(e){}})()"
         /**
          * Generic ad-slot selectors, kept deliberately narrow: every one names advertising outright,
          * so a false positive hides only a slot the request blocker has already emptied.
@@ -384,10 +419,11 @@ class WebViewFactory(private val appContext: Context, private val host: BrowserH
                 "iframe[src*=\"amazon-adsystem.com\"],.ad-slot,.ad-banner,.ad-container,.ad-wrapper,.ad-placeholder," +
                 ".adsbox,.advertisement,.advert-container,.sponsored-ad,.banner-ads,[data-ad-slot],[data-ad-client]," +
                 "[aria-label=\"advertisement\" i]{display:none!important}"
-        /** Injected before the document parses so slots never flash into view. */
-        private const val COSMETIC_SCRIPT =
-            "(function(){var s=document.createElement('style');s.textContent='" + COSMETIC_CSS + "';" +
-                "(document.head||document.documentElement).appendChild(s)})()"
+        /** Injected idempotently before the document parses so slots never flash into view. */
+        internal const val COSMETIC_SCRIPT =
+            "(function(){try{var id='" + COSMETIC_STYLE_ID + "';if(!document||document.getElementById(id))return;" +
+                "var t=document.head||document.documentElement;if(!t)return;" +
+                "var s=document.createElement('style');s.id=id;s.textContent='" + COSMETIC_CSS + "';t.appendChild(s)}catch(e){}})()"
         private val YOUTUBE_ORIGINS = setOf("https://*.youtube.com", "https://www.youtube-nocookie.com")
         /**
          * YouTube streams ads from the same hosts as videos, so request blocking cannot catch them. This strips

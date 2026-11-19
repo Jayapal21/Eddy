@@ -70,6 +70,8 @@ data class SiteSettings(
     val contentBlocking: Int? = null,
     /** Page text size for this host as a percentage; null follows the global setting. */
     val textZoom: Int? = null,
+    /** Per-site website darkening override ([ALLOW] or [BLOCK]); null follows the global setting. */
+    val darken: Int? = null,
 ) {
     companion object {
         const val ALLOW = 1

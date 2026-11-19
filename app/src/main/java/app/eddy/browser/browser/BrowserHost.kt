@@ -44,6 +44,8 @@ interface BrowserHost {
     fun onRenderGone(tab: BrowserTab)
     fun onFindResult(tab: BrowserTab, active: Int, total: Int)
     fun onScrolled(tab: BrowserTab, dy: Int, scrollY: Int)
+    fun onEdgeSwipe(tab: BrowserTab, direction: Int, progress: Float)
+    fun onEdgeSwipeRelease(tab: BrowserTab, direction: Int, commit: Boolean)
     /** Message from the in-page autofill script; [origin] comes from the WebView, never from the message body. */
     /** Chunk or status message from a blob download the browser started in [tab]. */
     fun onBlobMessage(tab: BrowserTab, origin: String, data: String, reply: JavaScriptReplyProxy)

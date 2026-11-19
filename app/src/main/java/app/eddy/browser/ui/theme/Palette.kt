@@ -131,6 +131,11 @@ data class FrostHeaderColors(
     val secondaryText: Color,
     val accent: Color,
     val activePillContainer: Color,
+    val islandSurface: Color,
+    val islandBorder: Color,
+    val islandTopHighlight: Color,
+    val islandPrimaryText: Color,
+    val islandSecondaryText: Color,
 )
 
 @androidx.compose.runtime.Composable
@@ -140,23 +145,28 @@ fun rememberFrostHeaderColors(isDark: Boolean): FrostHeaderColors {
         if (isDark) {
             FrostHeaderColors(
                 backdrop = Color(0xFF080B0D),
-                coinSurface = Color(0xFF171D24).copy(alpha = 0.90f),
+                coinSurface = Color(0xFF171D24).copy(alpha = 0.88f),
                 coinSurfacePressed = Color(0xFF222B35).copy(alpha = 0.96f),
-                capsuleSurface = Color(0xFF1B222B).copy(alpha = 0.92f),
+                capsuleSurface = Color(0xFF1B222B).copy(alpha = 0.90f),
                 capsuleSurfacePressed = Color(0xFF242D39).copy(alpha = 0.96f),
                 border = Color(0xFF29323D),
-                topHighlight = Color.White.copy(alpha = 0.06f),
+                topHighlight = Color.White.copy(alpha = 0.08f),
                 primaryText = Color(0xFFF5F7FA),
                 secondaryText = Color(0xFFA7B0BC),
                 accent = Color(0xFF36D6AE),
                 activePillContainer = Color(0xFF36D6AE).copy(alpha = 0.18f),
+                islandSurface = Color(0xFF10151C).copy(alpha = 0.86f),
+                islandBorder = Color.White.copy(alpha = 0.14f),
+                islandTopHighlight = Color.White.copy(alpha = 0.12f),
+                islandPrimaryText = Color(0xFFF5F7FA),
+                islandSecondaryText = Color(0xFFB3BCC8),
             )
         } else {
             FrostHeaderColors(
                 backdrop = scheme.background,
-                coinSurface = scheme.surfaceContainerHigh.copy(alpha = 0.92f),
+                coinSurface = scheme.surfaceContainerHigh.copy(alpha = 0.88f),
                 coinSurfacePressed = scheme.surfaceContainerHighest,
-                capsuleSurface = scheme.surfaceContainerLowest.copy(alpha = 0.96f),
+                capsuleSurface = scheme.surfaceContainerLowest.copy(alpha = 0.92f),
                 capsuleSurfacePressed = scheme.surfaceContainerHigh,
                 border = scheme.outlineVariant.copy(alpha = 0.55f),
                 topHighlight = Color.White.copy(alpha = 0.65f),
@@ -164,6 +174,11 @@ fun rememberFrostHeaderColors(isDark: Boolean): FrostHeaderColors {
                 secondaryText = scheme.onSurfaceVariant,
                 accent = scheme.primary,
                 activePillContainer = scheme.primaryContainer,
+                islandSurface = Color(0xFF12171E).copy(alpha = 0.84f),
+                islandBorder = Color.White.copy(alpha = 0.16f),
+                islandTopHighlight = Color.White.copy(alpha = 0.14f),
+                islandPrimaryText = Color(0xFFF5F7FA),
+                islandSecondaryText = Color(0xFFB6C0CC),
             )
         }
     }

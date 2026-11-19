@@ -666,13 +666,10 @@ Chaque site, moteur de recherche et hébergeur de liste que vous contactez peut 
     <string name="web_debugging_hint">Permet à chrome://inspect de se connecter aux pages via USB</string>
     <string name="skipped_suffix">, %1$s ignorés</string>
     <string name="voice_search">Recherche vocale</string>
-    <string name="discord_title">Eddy a un Discord</string>
-    <string name="discord_message">Rejoignez le nouveau serveur Discord d’Eddy pour discuter avec d’autres utilisateurs, signaler des bugs, proposer des fonctions et découvrir les nouvelles versions en premier.</string>
     <!-- Folder under fastlane/metadata/android that holds this language's changelogs. -->
     <string name="blocking_off_for_site">Le blocage des pubs et traqueurs est désactivé pour ce site</string>
     <string name="changelog_locale">fr-FR</string>
     <string name="changelog_title">Nouveautés</string>
-    <string name="discord_join">Rejoindre</string>
     <string name="the_certificate_is_untrusted">Ce certificat n’a pas été émis par une autorité de confiance.</string>
     <string name="feature_location">position</string>
     <string name="feature_camera">caméra</string>

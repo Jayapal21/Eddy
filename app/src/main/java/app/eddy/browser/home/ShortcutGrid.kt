@@ -38,8 +38,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -53,11 +55,13 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.eddy.browser.data.models.Shortcut
@@ -77,12 +81,25 @@ import app.eddy.browser.ui.shapes.EddyPolygons
 import app.eddy.browser.ui.shapes.MorphShape
 import app.eddy.browser.ui.shapes.rememberMorph
 import app.eddy.browser.ui.theme.LocalReducedMotion
+import androidx.compose.animation.animateContentSize
+import app.eddy.browser.ui.sakuga.SakugaAnimationController
+import app.eddy.browser.ui.sakuga.SakugaSpringType
 import app.eddy.browser.util.UrlUtils
 
 private sealed interface ShortcutCell {
-    data class Manual(val shortcut: Shortcut, val index: Int) : ShortcutCell
-    data class Recommended(val shortcut: Shortcut, val index: Int) : ShortcutCell
-    data object Add : ShortcutCell
+    val stableKey: String
+
+    data class Manual(val shortcut: Shortcut, val index: Int) : ShortcutCell {
+        override val stableKey: String get() = "manual_${shortcut.id}"
+    }
+
+    data class Recommended(val shortcut: Shortcut, val index: Int) : ShortcutCell {
+        override val stableKey: String get() = "rec_${shortcut.id}"
+    }
+
+    data object Add : ShortcutCell {
+        override val stableKey: String get() = "add_tile"
+    }
 }
 
 /**
@@ -126,126 +143,194 @@ fun ShortcutGrid(
     } + ShortcutCell.Add
 
     val safeColumns = columns.coerceAtLeast(1)
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        cells.chunked(safeColumns).forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                row.forEach { cell ->
-                    // With no shortcuts and no recommendations the lone add tile takes the full row so it sits in the centre.
-                    Box(if (order.isEmpty() && recommended.isEmpty()) Modifier.fillMaxWidth() else Modifier.weight(1f), contentAlignment = Alignment.TopCenter) {
-                        when (cell) {
-                            ShortcutCell.Add -> AddTile(tileSize, onAdd, onHide)
-                            is ShortcutCell.Manual -> {
-                                val item = cell.shortcut
-                                val index = cell.index
-                                val isDragging = draggingId == item.id
-                                Box(
-                                    Modifier
-                                        .onGloballyPositioned { c -> bounds[item.id] = Rect(c.positionInRoot(), Size(c.size.width.toFloat(), c.size.height.toFloat())) }
-                                        .pointerInput(item.id) {
-                                            var total = Offset.Zero
-                                            detectDragGesturesAfterLongPress(
-                                                onDragStart = { local ->
-                                                    haptics.longPress()
-                                                    draggingId = item.id
-                                                    grab = local
-                                                    total = Offset.Zero
-                                                    pointerRoot = (bounds[item.id]?.topLeft ?: Offset.Zero) + local
-                                                },
-                                                onDrag = { change, amount ->
-                                                    change.consume()
-                                                    total += amount
-                                                    pointerRoot = (bounds[item.id]?.topLeft ?: Offset.Zero) + change.position
-                                                    val now = System.currentTimeMillis()
-                                                    // A short cooldown lets layout catch up with a swap before the next one is considered.
-                                                    if (now - lastSwap < SWAP_COOLDOWN_MS) return@detectDragGesturesAfterLongPress
-                                                    val from = order.indexOfFirst { it.id == item.id }
-                                                    val target = bounds.entries.firstOrNull { (id, r) -> id != item.id && r.contains(pointerRoot) }?.key
-                                                    val to = order.indexOfFirst { it.id == target }
-                                                    if (to >= 0 && from >= 0) {
-                                                        haptics.tick()
-                                                        order = order.toMutableList().also { it.add(to, it.removeAt(from)) }
-                                                        lastSwap = now
-                                                    }
-                                                },
-                                                onDragEnd = {
-                                                    // Touch slop, not a few pixels: a finger always wobbles a little during a long press.
-                                                    if (total.getDistance() < viewConfiguration.touchSlop) menuFor = item.id
-                                                    draggingId = null
-                                                    if (order.map { it.id } != shortcuts.map { it.id }) onReorder(order)
-                                                },
-                                                onDragCancel = {
-                                                    // The tile's click consumes the release, so a still long press ends here, not in onDragEnd.
-                                                    if (total.getDistance() < viewConfiguration.touchSlop) menuFor = item.id
-                                                    draggingId = null
-                                                    if (order.map { it.id } != shortcuts.map { it.id }) onReorder(order)
-                                                },
-                                            )
-                                        },
-                                ) {
-                                    ShortcutTile(
-                                        shortcut = item,
-                                        index = index,
-                                        style = style,
-                                        tileSize = tileSize,
-                                        lifted = isDragging,
-                                        translation = {
-                                            if (isDragging) pointerRoot - grab - (bounds[item.id]?.topLeft ?: pointerRoot - grab) else Offset.Zero
-                                        },
-                                        // A long press also ends in a click on release; it opens the menu, not the site.
-                                        onClick = { if (draggingId != item.id) onOpen(item) },
-                                    )
-                                    DropdownMenu(expanded = menuFor == item.id, onDismissRequest = { menuFor = null }) {
-                                        DropdownMenuItem(
-                                            text = { Text(str(R.string.edit)) },
-                                            leadingIcon = { Icon(Icons.Rounded.Edit, null) },
-                                            onClick = { menuFor = null; onEdit(item) },
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text(str(R.string.remove_2)) },
-                                            leadingIcon = { Icon(Icons.Rounded.Delete, null) },
-                                            onClick = { menuFor = null; onRemove(item) },
-                                        )
-                                        HideItem { menuFor = null; onHide() }
+    val reduced = LocalReducedMotion.current
+    val singleCentered = order.isEmpty() && recommended.isEmpty()
+    ShortcutGridLayout(
+        columns = safeColumns,
+        rowSpacing = 20.dp,
+        centerSingle = singleCentered,
+        modifier = modifier
+            .fillMaxWidth()
+            .animateContentSize(SakugaAnimationController.springSpec(SakugaSpringType.PREMIUM, reduced)),
+    ) {
+        cells.forEach { cell ->
+            key(cell.stableKey) {
+                Box(contentAlignment = Alignment.TopCenter) {
+                    when (cell) {
+                        ShortcutCell.Add -> AddTile(tileSize, onAdd, onHide)
+                        is ShortcutCell.Manual -> {
+                            val item = cell.shortcut
+                            val index = cell.index
+                            val isDragging = draggingId == item.id
+                            DisposableEffect(item.id) {
+                                onDispose { bounds.remove(item.id) }
+                            }
+                            Box(
+                                Modifier
+                                    .onGloballyPositioned { c ->
+                                        bounds[item.id] = Rect(c.positionInRoot(), Size(c.size.width.toFloat(), c.size.height.toFloat()))
                                     }
+                                    .pointerInput(item.id) {
+                                        var total = Offset.Zero
+                                        detectDragGesturesAfterLongPress(
+                                            onDragStart = { local ->
+                                                haptics.longPress()
+                                                draggingId = item.id
+                                                grab = local
+                                                total = Offset.Zero
+                                                pointerRoot = (bounds[item.id]?.topLeft ?: Offset.Zero) + local
+                                            },
+                                            onDrag = { change, amount ->
+                                                change.consume()
+                                                total += amount
+                                                pointerRoot = (bounds[item.id]?.topLeft ?: Offset.Zero) + change.position
+                                                val now = System.currentTimeMillis()
+                                                // A short cooldown lets layout catch up with a swap before the next one is considered.
+                                                if (now - lastSwap < SWAP_COOLDOWN_MS) return@detectDragGesturesAfterLongPress
+                                                val from = order.indexOfFirst { it.id == item.id }
+                                                val target = bounds.entries.firstOrNull { (id, r) -> id != item.id && r.contains(pointerRoot) }?.key
+                                                val to = order.indexOfFirst { it.id == target }
+                                                if (to >= 0 && from >= 0) {
+                                                    haptics.tick()
+                                                    order = order.toMutableList().also { it.add(to, it.removeAt(from)) }
+                                                    lastSwap = now
+                                                }
+                                            },
+                                            onDragEnd = {
+                                                // Touch slop, not a few pixels: a finger always wobbles a little during a long press.
+                                                val orderChanged = order.map { it.id } != shortcuts.map { it.id }
+                                                if (!orderChanged && total.getDistance() < viewConfiguration.touchSlop) menuFor = item.id
+                                                draggingId = null
+                                                if (orderChanged) onReorder(order)
+                                            },
+                                            onDragCancel = {
+                                                // The tile's click consumes the release, so a still long press ends here, not in onDragEnd.
+                                                val orderChanged = order.map { it.id } != shortcuts.map { it.id }
+                                                if (!orderChanged && total.getDistance() < viewConfiguration.touchSlop) menuFor = item.id
+                                                draggingId = null
+                                                if (orderChanged) onReorder(order)
+                                            },
+                                        )
+                                    },
+                            ) {
+                                ShortcutTile(
+                                    shortcut = item,
+                                    index = index,
+                                    style = style,
+                                    tileSize = tileSize,
+                                    lifted = isDragging,
+                                    translation = {
+                                        if (isDragging) pointerRoot - grab - (bounds[item.id]?.topLeft ?: pointerRoot - grab) else Offset.Zero
+                                    },
+                                    // A long press also ends in a click on release; it opens the menu, not the site.
+                                    onClick = { if (draggingId != item.id) onOpen(item) },
+                                )
+                                DropdownMenu(expanded = menuFor == item.id, onDismissRequest = { menuFor = null }) {
+                                    DropdownMenuItem(
+                                        text = { Text(str(R.string.edit)) },
+                                        leadingIcon = { Icon(Icons.Rounded.Edit, null) },
+                                        onClick = { menuFor = null; onEdit(item) },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(str(R.string.remove_2)) },
+                                        leadingIcon = { Icon(Icons.Rounded.Delete, null) },
+                                        onClick = { menuFor = null; onRemove(item) },
+                                    )
+                                    HideItem { menuFor = null; onHide() }
                                 }
                             }
-                            is ShortcutCell.Recommended -> {
-                                val item = cell.shortcut
-                                Box {
-                                    ShortcutTile(
-                                        shortcut = item,
-                                        index = cell.index,
-                                        style = style,
-                                        tileSize = tileSize,
-                                        lifted = false,
-                                        translation = { Offset.Zero },
-                                        onClick = { onOpen(item) },
-                                        onLongClick = { recMenuFor = item.id },
-                                    )
-                                    DropdownMenu(expanded = recMenuFor == item.id, onDismissRequest = { recMenuFor = null }) {
-                                        if (onOpenNewTab != null) {
-                                            DropdownMenuItem(
-                                                text = { Text(str(R.string.open_in_new_tab)) },
-                                                leadingIcon = { Icon(Icons.AutoMirrored.Rounded.OpenInNew, null) },
-                                                onClick = { recMenuFor = null; onOpenNewTab(item) },
-                                            )
-                                        }
-                                        if (onPinRecommended != null) {
-                                            DropdownMenuItem(
-                                                text = { Text(str(R.string.add_to_start_page)) },
-                                                leadingIcon = { Icon(Icons.Rounded.Add, null) },
-                                                onClick = { recMenuFor = null; onPinRecommended(item) },
-                                            )
-                                        }
-                                        HideItem { recMenuFor = null; onHide() }
+                        }
+                        is ShortcutCell.Recommended -> {
+                            val item = cell.shortcut
+                            Box {
+                                ShortcutTile(
+                                    shortcut = item,
+                                    index = cell.index,
+                                    style = style,
+                                    tileSize = tileSize,
+                                    lifted = false,
+                                    translation = { Offset.Zero },
+                                    onClick = { onOpen(item) },
+                                    onLongClick = { recMenuFor = item.id },
+                                )
+                                DropdownMenu(expanded = recMenuFor == item.id, onDismissRequest = { recMenuFor = null }) {
+                                    if (onOpenNewTab != null) {
+                                        DropdownMenuItem(
+                                            text = { Text(str(R.string.open_in_new_tab)) },
+                                            leadingIcon = { Icon(Icons.AutoMirrored.Rounded.OpenInNew, null) },
+                                            onClick = { recMenuFor = null; onOpenNewTab(item) },
+                                        )
                                     }
+                                    if (onPinRecommended != null) {
+                                        DropdownMenuItem(
+                                            text = { Text(str(R.string.add_to_start_page)) },
+                                            leadingIcon = { Icon(Icons.Rounded.Add, null) },
+                                            onClick = { recMenuFor = null; onPinRecommended(item) },
+                                        )
+                                    }
+                                    HideItem { recMenuFor = null; onHide() }
                                 }
                             }
                         }
                     }
                 }
-                // Keep the last row's tiles aligned with the rows above.
-                repeat((safeColumns - row.size).coerceAtLeast(0)) { Box(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShortcutGridLayout(
+    columns: Int,
+    rowSpacing: Dp,
+    centerSingle: Boolean,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    Layout(content = content, modifier = modifier) { measurables, constraints ->
+        val safeCols = columns.coerceAtLeast(1)
+        val totalWidth = constraints.maxWidth
+        val slotWidth = if (totalWidth == Constraints.Infinity) {
+            Constraints.Infinity
+        } else {
+            (totalWidth / safeCols).coerceAtLeast(1)
+        }
+        val childConstraints = if (slotWidth == Constraints.Infinity) {
+            constraints.copy(minWidth = 0, minHeight = 0)
+        } else {
+            Constraints(minWidth = 0, maxWidth = slotWidth, minHeight = 0, maxHeight = constraints.maxHeight)
+        }
+        val placeables = measurables.map { it.measure(childConstraints) }
+        if (placeables.isEmpty()) {
+            return@Layout layout(constraints.minWidth, 0) {}
+        }
+        val spacingPx = rowSpacing.roundToPx()
+        val rows = placeables.chunked(safeCols)
+        val rowHeights = rows.map { row -> row.maxOfOrNull { it.height } ?: 0 }
+        val totalHeight = rowHeights.sum() + (rows.size - 1).coerceAtLeast(0) * spacingPx
+        val layoutWidth = if (totalWidth == Constraints.Infinity) {
+            rows.maxOf { row -> row.sumOf { it.width } }
+        } else {
+            totalWidth
+        }
+
+        layout(layoutWidth, totalHeight) {
+            var y = 0
+            rows.forEachIndexed { rowIndex, row ->
+                row.forEachIndexed { colIndex, placeable ->
+                    val x = if (centerSingle && placeables.size == 1) {
+                        ((layoutWidth - placeable.width) / 2).coerceAtLeast(0)
+                    } else {
+                        val effectiveSlot = if (slotWidth == Constraints.Infinity) {
+                            (layoutWidth / safeCols).coerceAtLeast(placeable.width)
+                        } else {
+                            slotWidth
+                        }
+                        colIndex * effectiveSlot + ((effectiveSlot - placeable.width) / 2).coerceAtLeast(0)
+                    }
+                    placeable.placeRelative(x = x, y = y)
+                }
+                y += rowHeights[rowIndex] + spacingPx
             }
         }
     }

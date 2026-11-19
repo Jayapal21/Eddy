@@ -187,6 +187,11 @@ object ReaderThemeManager {
         secondaryText = palette.secondaryText,
         accent = palette.accent,
         activePillContainer = palette.accentContainer,
+        islandSurface = Color(0xFF10151C).copy(alpha = 0.88f),
+        islandBorder = Color.White.copy(alpha = 0.14f),
+        islandTopHighlight = Color.White.copy(alpha = 0.12f),
+        islandPrimaryText = Color(0xFFF5F7FA),
+        islandSecondaryText = Color(0xFFB3BCC8),
     )
 }
 

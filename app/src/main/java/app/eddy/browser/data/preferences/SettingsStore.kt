@@ -130,7 +130,6 @@ class SettingsStore(private val context: Context) {
         val httpsOnly = booleanPreferencesKey("https_only")
         val clearOnExit = booleanPreferencesKey("clear_on_exit")
         val onboardingDone = booleanPreferencesKey("onboarding_done")
-        val discordAnnounced = booleanPreferencesKey("discord_announced")
         val changelogSeen = intPreferencesKey("changelog_seen")
         val savePasswords = booleanPreferencesKey("save_passwords")
         val autofillPasswords = booleanPreferencesKey("autofill_passwords")
@@ -148,65 +147,7 @@ class SettingsStore(private val context: Context) {
         val shortcuts = stringPreferencesKey("shortcuts")
     }
 
-    private inline fun <reified E : Enum<E>> String?.toEnum(default: E): E =
-        enumValues<E>().firstOrNull { it.name == this } ?: default
-
-    private fun Preferences.toSettings(): Settings {
-        val d = Settings()
-        return Settings(
-            themeMode = this[K.theme].toEnum(d.themeMode),
-            readerTheme = this[K.readerTheme].toEnum(d.readerTheme),
-            amoled = this[K.amoled] ?: d.amoled,
-            dynamicColor = this[K.dynamic] ?: d.dynamicColor,
-            palette = this[K.palette] ?: d.palette,
-            toolbarPosition = this[K.toolbar].toEnum(d.toolbarPosition),
-            homeDensity = this[K.density].toEnum(d.homeDensity),
-            motion = this[K.motion].toEnum(d.motion),
-            shortcutStyle = this[K.shortcutStyle].toEnum(d.shortcutStyle),
-            homeShowTitle = this[K.homeShowTitle] ?: d.homeShowTitle,
-            homeShowSearch = this[K.homeShowSearch] ?: d.homeShowSearch,
-            homeShowShortcuts = this[K.homeShowShortcuts] ?: d.homeShowShortcuts,
-            homeShowFrequent = this[K.homeShowFrequent] ?: d.homeShowFrequent,
-            homeShowRecent = this[K.homeShowRecent] ?: d.homeShowRecent,
-            homeShowBackground = this[K.homeShowBackground] ?: d.homeShowBackground,
-            homeColumns = this[K.homeColumns] ?: d.homeColumns,
-            hapticsEnabled = this[K.haptics] ?: d.hapticsEnabled,
-            searchEngineId = this[K.engine] ?: d.searchEngineId,
-            customEngines = this[K.customEngines]?.let(::decodeEngines) ?: emptyList(),
-            searxngInstance = this[K.searxng] ?: d.searxngInstance,
-            searchSuggestions = this[K.suggestions] ?: d.searchSuggestions,
-            homepageMode = this[K.homepageMode].toEnum(d.homepageMode),
-            homepageUrl = this[K.homepageUrl] ?: "",
-            externalLinks = this[K.external].toEnum(d.externalLinks),
-            downloadLocation = this[K.downloadLocation].toEnum(d.downloadLocation),
-            externalDownloads = this[K.externalDownloads] ?: d.externalDownloads,
-            adBlock = this[K.adBlock] ?: d.adBlock,
-            trackerProtection = this[K.trackers] ?: d.trackerProtection,
-            filterLists = this[K.filterLists]?.let { decodeFilterLists(it, this[K.filterDefaultsSeen]) } ?: DefaultFilterLists,
-            filterListsUpdatedAt = this[K.filterUpdated] ?: 0L,
-            cookieMode = this[K.cookies].toEnum(d.cookieMode),
-            javascript = this[K.js] ?: d.javascript,
-            doNotTrack = this[K.dnt] ?: d.doNotTrack,
-            httpsOnly = this[K.httpsOnly] ?: d.httpsOnly,
-            clearOnExit = this[K.clearOnExit] ?: d.clearOnExit,
-            onboardingCompleted = this[K.onboardingDone] ?: d.onboardingCompleted,
-            discordAnnounced = this[K.discordAnnounced] ?: d.discordAnnounced,
-            changelogSeen = this[K.changelogSeen] ?: d.changelogSeen,
-            savePasswords = this[K.savePasswords] ?: d.savePasswords,
-            autofillPasswords = this[K.autofillPasswords] ?: d.autofillPasswords,
-            restoreTabs = this[K.restore] ?: d.restoreTabs,
-            alwaysIncognito = this[K.alwaysIncognito] ?: d.alwaysIncognito,
-            switchToNewTabs = this[K.switchToNew] ?: d.switchToNewTabs,
-            tabLayout = this[K.tabLayout].toEnum(d.tabLayout),
-            closeTabBehavior = this[K.closeBehavior].toEnum(d.closeTabBehavior),
-            userAgentMode = this[K.uaMode].toEnum(d.userAgentMode),
-            customUserAgent = this[K.ua] ?: "",
-            textZoom = this[K.zoom] ?: d.textZoom,
-            darkenPages = this[K.darken] ?: d.darkenPages,
-            webDebugging = this[K.debug] ?: d.webDebugging,
-            shortcuts = this[K.shortcuts]?.let(::decodeShortcuts) ?: DefaultShortcuts,
-        )
-    }
+    private fun Preferences.toSettings(): Settings = decodePreferences(this)
 
     private fun MutablePreferences.write(s: Settings) {
         this[K.theme] = s.themeMode.name
@@ -246,7 +187,6 @@ class SettingsStore(private val context: Context) {
         this[K.httpsOnly] = s.httpsOnly
         this[K.clearOnExit] = s.clearOnExit
         this[K.onboardingDone] = s.onboardingCompleted
-        this[K.discordAnnounced] = s.discordAnnounced
         this[K.changelogSeen] = s.changelogSeen
         this[K.savePasswords] = s.savePasswords
         this[K.autofillPasswords] = s.autofillPasswords
@@ -268,6 +208,62 @@ class SettingsStore(private val context: Context) {
         private const val FORMAT = 1
         /** Describes this install rather than the user's choices, so it is neither exported nor imported. */
         private val InstallState = setOf("onboarding_done", "discord_announced", "changelog_seen", "filter_updated", "filter_defaults_seen")
+
+        internal fun decodePreferences(prefs: Preferences): Settings {
+            val d = Settings()
+            return Settings(
+                themeMode = enumValues<ThemeMode>().firstOrNull { it.name == prefs[K.theme] } ?: d.themeMode,
+                readerTheme = enumValues<ReaderThemeMode>().firstOrNull { it.name == prefs[K.readerTheme] } ?: d.readerTheme,
+                amoled = prefs[K.amoled] ?: d.amoled,
+                dynamicColor = prefs[K.dynamic] ?: d.dynamicColor,
+                palette = prefs[K.palette] ?: d.palette,
+                toolbarPosition = enumValues<ToolbarPosition>().firstOrNull { it.name == prefs[K.toolbar] } ?: d.toolbarPosition,
+                homeDensity = enumValues<HomeDensity>().firstOrNull { it.name == prefs[K.density] } ?: d.homeDensity,
+                motion = enumValues<MotionPref>().firstOrNull { it.name == prefs[K.motion] } ?: d.motion,
+                shortcutStyle = enumValues<ShortcutStyle>().firstOrNull { it.name == prefs[K.shortcutStyle] } ?: d.shortcutStyle,
+                homeShowTitle = prefs[K.homeShowTitle] ?: d.homeShowTitle,
+                homeShowSearch = prefs[K.homeShowSearch] ?: d.homeShowSearch,
+                homeShowShortcuts = prefs[K.homeShowShortcuts] ?: d.homeShowShortcuts,
+                homeShowFrequent = prefs[K.homeShowFrequent] ?: d.homeShowFrequent,
+                homeShowRecent = prefs[K.homeShowRecent] ?: d.homeShowRecent,
+                homeShowBackground = prefs[K.homeShowBackground] ?: d.homeShowBackground,
+                homeColumns = prefs[K.homeColumns] ?: d.homeColumns,
+                hapticsEnabled = prefs[K.haptics] ?: d.hapticsEnabled,
+                searchEngineId = prefs[K.engine] ?: d.searchEngineId,
+                customEngines = prefs[K.customEngines]?.let(::decodeEngines) ?: emptyList(),
+                searxngInstance = prefs[K.searxng] ?: d.searxngInstance,
+                searchSuggestions = prefs[K.suggestions] ?: d.searchSuggestions,
+                homepageMode = enumValues<HomepageMode>().firstOrNull { it.name == prefs[K.homepageMode] } ?: d.homepageMode,
+                homepageUrl = prefs[K.homepageUrl] ?: "",
+                externalLinks = enumValues<ExternalLinks>().firstOrNull { it.name == prefs[K.external] } ?: d.externalLinks,
+                downloadLocation = enumValues<DownloadLocation>().firstOrNull { it.name == prefs[K.downloadLocation] } ?: d.downloadLocation,
+                externalDownloads = prefs[K.externalDownloads] ?: d.externalDownloads,
+                adBlock = prefs[K.adBlock] ?: d.adBlock,
+                trackerProtection = prefs[K.trackers] ?: d.trackerProtection,
+                filterLists = prefs[K.filterLists]?.let { decodeFilterLists(it, prefs[K.filterDefaultsSeen]) } ?: DefaultFilterLists,
+                filterListsUpdatedAt = prefs[K.filterUpdated] ?: 0L,
+                cookieMode = enumValues<CookieMode>().firstOrNull { it.name == prefs[K.cookies] } ?: d.cookieMode,
+                javascript = prefs[K.js] ?: d.javascript,
+                doNotTrack = prefs[K.dnt] ?: d.doNotTrack,
+                httpsOnly = prefs[K.httpsOnly] ?: d.httpsOnly,
+                clearOnExit = prefs[K.clearOnExit] ?: d.clearOnExit,
+                onboardingCompleted = prefs[K.onboardingDone] ?: d.onboardingCompleted,
+                changelogSeen = prefs[K.changelogSeen] ?: d.changelogSeen,
+                savePasswords = prefs[K.savePasswords] ?: d.savePasswords,
+                autofillPasswords = prefs[K.autofillPasswords] ?: d.autofillPasswords,
+                restoreTabs = prefs[K.restore] ?: d.restoreTabs,
+                alwaysIncognito = prefs[K.alwaysIncognito] ?: d.alwaysIncognito,
+                switchToNewTabs = prefs[K.switchToNew] ?: d.switchToNewTabs,
+                tabLayout = enumValues<TabLayout>().firstOrNull { it.name == prefs[K.tabLayout] } ?: d.tabLayout,
+                closeTabBehavior = enumValues<CloseTabBehavior>().firstOrNull { it.name == prefs[K.closeBehavior] } ?: d.closeTabBehavior,
+                userAgentMode = enumValues<UserAgentMode>().firstOrNull { it.name == prefs[K.uaMode] } ?: d.userAgentMode,
+                customUserAgent = prefs[K.ua] ?: "",
+                textZoom = prefs[K.zoom] ?: d.textZoom,
+                darkenPages = prefs[K.darken] ?: d.darkenPages,
+                webDebugging = prefs[K.debug] ?: d.webDebugging,
+                shortcuts = prefs[K.shortcuts]?.let(::decodeShortcuts) ?: DefaultShortcuts,
+            )
+        }
 
         internal fun resolveOnboardingMigration(existingOnboardingDone: Boolean?, isUpdatedInstall: () -> Boolean): Boolean? =
             if (existingOnboardingDone == null && isUpdatedInstall()) true else null

@@ -337,6 +337,7 @@
     <string name="eddy_also_respects_the_system_remove_ani">Eddy also respects the system Remove animations setting.</string>
     <string name="web_content">Web content</string>
     <string name="darken_websites">Darken websites</string>
+    <string name="darken_this_website">Darken this website</string>
     <string name="dark_colors_for_sites_without_a_dark_the">Dark colors for sites without a dark theme, when your phone is in dark mode</string>
     <string name="sections">Sections</string>
     <string name="show_title">Show title</string>
@@ -668,13 +669,10 @@ Each site, search engine and list host you contact can see your IP address and t
     <string name="web_debugging_hint">Lets chrome://inspect attach to pages over USB</string>
     <string name="skipped_suffix">, %1$s skipped</string>
     <string name="voice_search">Voice search</string>
-    <string name="discord_title">Eddy has a Discord</string>
-    <string name="discord_message">Join the new Eddy Discord server to chat with other users, report bugs, suggest features and hear about releases first.</string>
     <!-- Folder under fastlane/metadata/android that holds this language's changelogs. -->
     <string name="blocking_off_for_site">Ad and tracker blocking is off for this site</string>
     <string name="changelog_locale">en-US</string>
     <string name="changelog_title">What\'s new</string>
-    <string name="discord_join">Join</string>
     <string name="the_certificate_is_untrusted">A trusted authority did not issue this certificate.</string>
     <string name="feature_location">location</string>
     <string name="feature_camera">camera</string>
@@ -768,4 +766,6 @@ Each site, search engine and list host you contact can see your IP address and t
         <item quantity="one">%d image</item>
         <item quantity="other">%d images</item>
     </plurals>
+    <string name="hide_toolbar">Hide toolbar</string>
+    <string name="double_tap_to_toggle_toolbar">Double-tap to toggle toolbar</string>
 </resources>

@@ -113,12 +113,16 @@ import app.eddy.browser.ui.animation.entrance
 import app.eddy.browser.ui.components.EddyIconButton
 import app.eddy.browser.ui.components.ShortcutIcons
 import app.eddy.browser.ui.components.SiteIcon
+import app.eddy.browser.ui.sakuga.SakugaAnimationController
 import app.eddy.browser.ui.sakuga.SakugaCard
 import app.eddy.browser.ui.sakuga.SakugaEffectType
-import app.eddy.browser.ui.sakuga.SakugaPhysics
+import app.eddy.browser.ui.sakuga.SakugaMotionPreset
+import app.eddy.browser.ui.sakuga.SakugaParticlePreset
+import app.eddy.browser.ui.sakuga.SakugaSpringType
 import app.eddy.browser.ui.sakuga.rememberSakugaColors
 import app.eddy.browser.ui.sakuga.rememberSakugaController
 import app.eddy.browser.ui.sakuga.sakugaOverlay
+import app.eddy.browser.ui.sakuga.sakugaPressEffect
 import app.eddy.browser.ui.sakuga.sakugaPressSquash
 import app.eddy.browser.ui.theme.Dimens
 import app.eddy.browser.ui.theme.LocalReducedMotion
@@ -140,7 +144,7 @@ fun HomeScreen(
     var editing by remember { mutableStateOf<Shortcut?>(null) }
     val compact = settings.homeDensity == HomeDensity.COMPACT
     val reduced = LocalReducedMotion.current
-    val searching = vm.editing
+    val searching = vm.editing && settings.homeShowSearch
     val suggestions by vm.suggestions.collectAsStateWithLifecycle()
 
     val siteStatsFlow = remember(vm, incognito, settings.homeShowShortcuts) {
@@ -175,10 +179,10 @@ fun HomeScreen(
         tween(animDuration, easing = FastOutSlowInEasing),
         label = "lowerShift",
     )
-    val topSpacer by animateDpAsState(
-        if (searching) 56.dp else if (compact) 52.dp else 62.dp,
+    val topGap by animateDpAsState(
+        if (searching) 4.dp else if (compact) 8.dp else 16.dp,
         tween(animDuration, easing = FastOutSlowInEasing),
-        label = "topSpacer",
+        label = "topGap",
     )
 
     Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -198,16 +202,53 @@ fun HomeScreen(
               ),
       ) {
         if (settings.homeShowBackground) AmbientShapes()
-        BoxWithConstraints(Modifier.fillMaxSize().padding(contentPadding), contentAlignment = Alignment.TopCenter) {
-            val columns = settings.homeColumns.takeIf { it > 0 } ?: if (maxWidth >= 600.dp) 6 else 4
-            val maxSuggestionsHeight = (maxHeight - topSpacer - 92.dp).coerceIn(140.dp, 360.dp)
-            Column(
-                Modifier.widthIn(max = Dimens.screenMaxWidth).fillMaxSize().verticalScroll(rememberScrollState())
-                    .padding(horizontal = Dimens.gutterLarge),
-                horizontalAlignment = Alignment.CenterHorizontally,
+        Column(Modifier.fillMaxSize().padding(contentPadding)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Spacer(Modifier.height(topSpacer))
-                if (settings.homeShowSearch) {
+                TabCountButton(
+                    count = vm.tabs.tabs.count { it.incognito == incognito },
+                    incognito = incognito,
+                    onClick = vm::openTabSwitcher,
+                    modifier = Modifier.testTag("home_tabs_button"),
+                )
+                if (!incognito) {
+                    TopActionIcon(
+                        icon = Icons.Outlined.Tune,
+                        contentDescription = str(R.string.customize),
+                        pressRotation = 45f,
+                        onClick = {
+                            vm.settingsStack.clear()
+                            vm.settingsStack.addAll(listOf(SettingsPage.APPEARANCE, SettingsPage.START_PAGE))
+                            vm.screen = Screen.SETTINGS
+                        },
+                        modifier = Modifier.testTag("home_customize_button"),
+                    )
+                }
+                TopActionIcon(
+                    icon = Icons.Outlined.MoreVert,
+                    contentDescription = str(R.string.menu),
+                    pressRotation = 0f,
+                    onClick = { vm.menuVisible = true },
+                    modifier = Modifier.testTag("home_menu_button"),
+                )
+            }
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                val columns = settings.homeColumns.takeIf { it > 0 } ?: if (maxWidth >= 600.dp) 6 else 4
+                val maxSuggestionsHeight = (maxHeight - topGap - 92.dp).coerceIn(140.dp, 360.dp)
+                Column(
+                    Modifier.widthIn(max = Dimens.screenMaxWidth)
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = Dimens.gutterLarge),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Spacer(Modifier.height(topGap))
+                    if (settings.homeShowSearch) {
                     HomeSearchBar(
                         settings = settings,
                         incognito = incognito,
@@ -228,89 +269,70 @@ fun HomeScreen(
                 }
 
                 Column(
-                    Modifier.fillMaxWidth().graphicsLayer {
-                        alpha = lowerAlpha
-                        translationY = lowerShift.toPx()
-                    },
+                    Modifier.fillMaxWidth()
+                        .graphicsLayer {
+                            alpha = lowerAlpha
+                            translationY = lowerShift.toPx()
+                        }
+                        .animateContentSize(SakugaAnimationController.springSpec(SakugaSpringType.PREMIUM, reduced)),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     if (!incognito) {
-                        if (settings.homeShowShortcuts) ShortcutGrid(
-                            shortcuts = settings.shortcuts,
-                            style = settings.shortcutStyle,
-                            columns = columns,
-                            tileSize = if (compact) Dimens.shortcutSizeCompact else Dimens.shortcutSize,
-                            onOpen = { vm.navigate(it.url) },
-                            onEdit = { editing = it },
-                            onRemove = { s -> vm.launchSettings { it.copy(shortcuts = it.shortcuts.filterNot { x -> x.id == s.id }) } },
-                            onReorder = { list -> vm.launchSettings { it.copy(shortcuts = list) } },
-                            onAdd = { editing = Shortcut(UUID.randomUUID().toString(), "", "https://", settings.shortcuts.size, settings.shortcuts.size) },
-                            onHide = {
-                                vm.launchSettings { it.copy(homeShowShortcuts = false) }
-                                vm.snackbar(str(R.string.shortcuts_hidden_show_them_again_in_sett), str(R.string.undo)) {
-                                    vm.launchSettings { it.copy(homeShowShortcuts = true) }
-                                }
-                            },
-                            modifier = Modifier.entrance(1),
-                            recommended = recommendedShortcuts,
-                            onOpenNewTab = { vm.openInNewTab(it.url) },
-                            onPinRecommended = { rec ->
-                                val recHost = UrlUtils.displayHost(rec.url)
-                                vm.launchSettings { s ->
-                                    if (s.shortcuts.any { UrlUtils.displayHost(it.url) == recHost }) s
-                                    else s.copy(
-                                        shortcuts = s.shortcuts + Shortcut(
-                                            id = UUID.randomUUID().toString(),
-                                            title = rec.title,
-                                            url = rec.url,
-                                            shape = s.shortcuts.size,
-                                            color = s.shortcuts.size,
-                                        ),
-                                    )
-                                }
-                                vm.snackbar(str(R.string.added_to_home_shortcuts))
-                            },
-                        )
-                        Spacer(Modifier.height(32.dp))
+                        val sectionFade = tween<Float>(if (reduced) 0 else 200, easing = FastOutSlowInEasing)
+                        val sectionSize = tween<androidx.compose.ui.unit.IntSize>(if (reduced) 0 else 240, easing = FastOutSlowInEasing)
+                        AnimatedVisibility(
+                            visible = settings.homeShowShortcuts,
+                            enter = fadeIn(sectionFade) + expandVertically(sectionSize),
+                            exit = fadeOut(sectionFade) + shrinkVertically(sectionSize),
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                ShortcutGrid(
+                                    shortcuts = settings.shortcuts,
+                                    style = settings.shortcutStyle,
+                                    columns = columns,
+                                    tileSize = if (compact) Dimens.shortcutSizeCompact else Dimens.shortcutSize,
+                                    onOpen = { vm.navigate(it.url) },
+                                    onEdit = { editing = it },
+                                    onRemove = { s -> vm.launchSettings { it.copy(shortcuts = it.shortcuts.filterNot { x -> x.id == s.id }) } },
+                                    onReorder = { list -> vm.launchSettings { it.copy(shortcuts = list) } },
+                                    onAdd = { editing = Shortcut(UUID.randomUUID().toString(), "", "https://", settings.shortcuts.size, settings.shortcuts.size) },
+                                    onHide = {
+                                        vm.launchSettings { it.copy(homeShowShortcuts = false) }
+                                        vm.snackbar(str(R.string.shortcuts_hidden_show_them_again_in_sett), str(R.string.undo)) {
+                                            vm.launchSettings { it.copy(homeShowShortcuts = true) }
+                                        }
+                                    },
+                                    modifier = Modifier.entrance(1),
+                                    recommended = recommendedShortcuts,
+                                    onOpenNewTab = { vm.openInNewTab(it.url) },
+                                    onPinRecommended = { rec ->
+                                        val recHost = UrlUtils.displayHost(rec.url)
+                                        vm.launchSettings { s ->
+                                            if (s.shortcuts.any { UrlUtils.displayHost(it.url) == recHost }) s
+                                            else s.copy(
+                                                shortcuts = s.shortcuts + Shortcut(
+                                                    id = UUID.randomUUID().toString(),
+                                                    title = rec.title,
+                                                    url = rec.url,
+                                                    shape = s.shortcuts.size,
+                                                    color = s.shortcuts.size,
+                                                ),
+                                            )
+                                        }
+                                        vm.snackbar(str(R.string.added_to_home_shortcuts))
+                                    },
+                                )
+                                Spacer(Modifier.height(32.dp))
+                            }
+                        }
                         VisitedSections(vm, settings.homeShowFrequent, settings.homeShowRecent)
                     } else {
                         IncognitoNote(vm.incognitoIsolated, Modifier.entrance(1))
                     }
                 }
                 Spacer(Modifier.height(32.dp))
+                }
             }
-        }
-        Row(
-            Modifier.align(Alignment.TopEnd).padding(contentPadding).padding(horizontal = 10.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TabCountButton(
-                count = vm.tabs.tabs.count { it.incognito == incognito },
-                incognito = incognito,
-                onClick = vm::openTabSwitcher,
-                modifier = Modifier.testTag("home_tabs_button"),
-            )
-            if (!incognito) {
-                TopActionIcon(
-                    icon = Icons.Outlined.Tune,
-                    contentDescription = str(R.string.customize),
-                    pressRotation = 45f,
-                    onClick = {
-                        vm.settingsStack.clear()
-                        vm.settingsStack.addAll(listOf(SettingsPage.APPEARANCE, SettingsPage.START_PAGE))
-                        vm.screen = Screen.SETTINGS
-                    },
-                    modifier = Modifier.testTag("home_customize_button"),
-                )
-            }
-            TopActionIcon(
-                icon = Icons.Outlined.MoreVert,
-                contentDescription = str(R.string.menu),
-                pressRotation = 0f,
-                onClick = { vm.menuVisible = true },
-                modifier = Modifier.testTag("home_menu_button"),
-            )
         }
       }
     }
@@ -341,13 +363,11 @@ private fun TopActionIcon(
 ) {
     val reduced = LocalReducedMotion.current
     val scheme = MaterialTheme.colorScheme
-    val sakugaColors = rememberSakugaColors()
-    val controller = rememberSakugaController()
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
     val rotation by animateFloatAsState(
-        targetValue = if (pressed) pressRotation else 0f,
-        animationSpec = SakugaPhysics.overshootSpring(reduced),
+        targetValue = if (pressed && !reduced) pressRotation else 0f,
+        animationSpec = SakugaAnimationController.springSpec(SakugaSpringType.PREMIUM, reduced),
         label = "topActionRotation",
     )
     val wash by animateColorAsState(
@@ -359,12 +379,13 @@ private fun TopActionIcon(
     Box(
         modifier
             .size(Dimens.touchTarget)
-            .sakugaPressSquash(
+            .sakugaPressEffect(
                 interactionSource = source,
-                pressX = SakugaPhysics.PRESS_ICON_SCALE_X,
-                pressY = SakugaPhysics.PRESS_ICON_SCALE_Y,
+                role = SakugaAnimationController.ComponentRole.ICON_BUTTON,
+                particlePreset = SakugaParticlePreset.SUBTLE,
+                enableImpactRing = false,
+                preset = SakugaMotionPreset.PREMIUM,
             )
-            .sakugaOverlay(controller)
             .clip(CircleShape)
             .background(wash)
             .clickable(
@@ -372,10 +393,7 @@ private fun TopActionIcon(
                 indication = androidx.compose.material3.ripple(bounded = true),
                 role = Role.Button,
                 onClickLabel = contentDescription,
-                onClick = {
-                    controller.emitCenter(SakugaEffectType.SUBTLE_POP, sakugaColors, intensity = 0.8f)
-                    onClick()
-                },
+                onClick = onClick,
             ),
         contentAlignment = Alignment.Center,
     ) {
@@ -418,53 +436,46 @@ private fun HomeSearchBar(
             value = TextFieldValue(queryText, TextRange(queryText.length))
         }
     }
-    LaunchedEffect(expanded) {
-        if (!expanded && value.text.isNotEmpty()) {
-            value = TextFieldValue("")
-        }
-    }
 
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
-    LaunchedEffect(expanded) {
-        if (expanded) {
-            focusRequester.requestFocus()
-            keyboard?.show()
-        } else {
-            focusManager.clearFocus(force = true)
-            keyboard?.hide()
-        }
-    }
-
     val voice = rememberVoiceState()
     val frozenSuggestions = remember(voice.listening) { suggestions }
     val shownSuggestions = if (voice.listening) frozenSuggestions else suggestions
     val reduced = LocalReducedMotion.current
-    val animMs = if (reduced) 0 else 280
-    val expandMs = if (reduced) 0 else 300
+    val animMs = if (reduced) 0 else 240
+    val expandMs = if (reduced) 0 else 280
     val scheme = MaterialTheme.colorScheme
     val sakugaColors = rememberSakugaColors()
     val searchController = rememberSakugaController()
     val barPressSource = remember { MutableInteractionSource() }
     val typingPulse = remember { Animatable(1f) }
     var prevTextLength by remember { mutableIntStateOf(value.text.length) }
-    LaunchedEffect(value.text.length, expanded) {
+    LaunchedEffect(value.text.length, expanded, reduced) {
         if (!reduced && expanded && value.text.length > prevTextLength) {
-            typingPulse.snapTo(1.012f)
-            typingPulse.animateTo(1f, SakugaPhysics.pressSpring(false))
+            typingPulse.snapTo(1.006f)
+            typingPulse.animateTo(1f, SakugaAnimationController.springSpec(SakugaSpringType.SNAPPY, false))
         }
         prevTextLength = value.text.length
     }
     var wasExpanded by remember { mutableStateOf(expanded) }
     LaunchedEffect(expanded) {
-        if (expanded && !wasExpanded && searchController.lastSize.width > 0f) {
-            searchController.emit(
-                SakugaEffectType.SUBTLE_POP,
-                androidx.compose.ui.geometry.Offset(30f, 30f),
-                sakugaColors,
-                intensity = 0.72f,
-            )
+        if (expanded) {
+            focusRequester.requestFocus()
+            keyboard?.show()
+            if (!wasExpanded && !reduced && searchController.lastSize.width > 0f) {
+                searchController.emit(
+                    SakugaEffectType.SUBTLE_POP,
+                    androidx.compose.ui.geometry.Offset(30f, 30f),
+                    sakugaColors,
+                    intensity = 0.6f,
+                )
+            }
+        } else if (wasExpanded) {
+            if (value.text.isNotEmpty()) value = TextFieldValue("")
+            focusManager.clearFocus(force = true)
+            keyboard?.hide()
         }
         wasExpanded = expanded
     }
@@ -478,8 +489,8 @@ private fun HomeSearchBar(
         label = "searchCorner",
     )
     val scale by animateFloatAsState(
-        if (expanded) 1.015f else 1f,
-        SakugaPhysics.overshootSpring(reduced),
+        if (expanded && !reduced) 1.01f else 1f,
+        SakugaAnimationController.springSpec(SakugaSpringType.PREMIUM, reduced),
         label = "searchScale",
     )
     val shadow by animateDpAsState(
@@ -532,7 +543,21 @@ private fun HomeSearchBar(
         shadowElevation = shadow,
         border = BorderStroke(borderWidth, borderColor),
     ) {
-        Column(Modifier.fillMaxWidth()) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .then(
+                    if (expanded) {
+                        Modifier.clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {},
+                        )
+                    } else {
+                        Modifier
+                    },
+                ),
+        ) {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -702,6 +727,10 @@ private fun HomeSearchBar(
 
 @Composable
 private fun VisitedSections(vm: BrowserViewModel, showFrequent: Boolean, showRecent: Boolean) {
+    val reduced = LocalReducedMotion.current
+    val fade = tween<Float>(if (reduced) 0 else 200, easing = FastOutSlowInEasing)
+    val expand = tween<androidx.compose.ui.unit.IntSize>(if (reduced) 0 else 240, easing = FastOutSlowInEasing)
+
     // Nothing is queried for a section the user turned off.
     val frequentFlow = remember(vm, showFrequent) {
         if (showFrequent) vm.history.frequentSites(8) else flowOf(emptyList())
@@ -711,35 +740,55 @@ private fun VisitedSections(vm: BrowserViewModel, showFrequent: Boolean, showRec
     }
     val frequent by frequentFlow.collectAsStateWithLifecycle(emptyList())
     val recent by recentFlow.collectAsStateWithLifecycle(emptyList())
-    if (frequent.isNotEmpty()) {
-        SectionTitle(str(R.string.frequently_visited), Modifier.entrance(2))
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.entrance(2).fillMaxWidth(),
-        ) {
-            items(frequent, key = { it.host }) { site ->
-                SakugaCard(
-                    onClick = { vm.navigate(site.url) },
-                    burstOnClick = true,
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    modifier = Modifier.heightIn(min = Dimens.touchTarget),
-                ) {
-                    Row(Modifier.padding(start = 8.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        SiteIcon(site.host, size = 28.dp, fetch = true)
-                        Text(site.host, Modifier.padding(start = 8.dp), style = MaterialTheme.typography.labelLarge, maxLines = 1)
+    AnimatedVisibility(
+        visible = frequent.isNotEmpty(),
+        enter = fadeIn(fade) + expandVertically(expand),
+        exit = fadeOut(fade) + shrinkVertically(expand),
+    ) {
+        Column(Modifier.fillMaxWidth()) {
+            SectionTitle(str(R.string.frequently_visited), Modifier.entrance(2))
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.entrance(2).fillMaxWidth(),
+            ) {
+                items(frequent, key = { it.host }) { site ->
+                    SakugaCard(
+                        onClick = { vm.navigate(site.url) },
+                        burstOnClick = true,
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        modifier = Modifier.heightIn(min = Dimens.touchTarget),
+                    ) {
+                        Row(Modifier.padding(start = 8.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            SiteIcon(site.host, size = 28.dp, fetch = true)
+                            Text(site.host, Modifier.padding(start = 8.dp), style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                        }
                     }
                 }
             }
+            Spacer(Modifier.height(24.dp))
         }
-        Spacer(Modifier.height(24.dp))
     }
     val recentShown = recent.filter { r -> frequent.take(3).none { it.host == r.host } }.take(4)
-    if (recentShown.isNotEmpty()) {
-        SectionTitle(str(R.string.recently_visited), Modifier.entrance(3))
-        Column(Modifier.entrance(3).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainerLow)) {
-            recentShown.forEach { RecentRow(it) { vm.navigate(it.url) } }
+    AnimatedVisibility(
+        visible = recentShown.isNotEmpty(),
+        enter = fadeIn(fade) + expandVertically(expand),
+        exit = fadeOut(fade) + shrinkVertically(expand),
+    ) {
+        Column(Modifier.fillMaxWidth()) {
+            SectionTitle(str(R.string.recently_visited), Modifier.entrance(3))
+            Column(Modifier.entrance(3).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainerLow)) {
+                recentShown.forEachIndexed { index, site ->
+                    RecentRow(site) { vm.navigate(site.url) }
+                    if (index < recentShown.lastIndex) {
+                        HorizontalDivider(
+                            Modifier.padding(start = 62.dp, end = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -751,7 +800,13 @@ private fun RecentRow(site: SiteVisit, onClick: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .heightIn(min = 60.dp)
-            .sakugaPressSquash(source, pressX = SakugaPhysics.PRESS_CARD_SCALE_X, pressY = SakugaPhysics.PRESS_CARD_SCALE_Y)
+            .sakugaPressEffect(
+                interactionSource = source,
+                role = SakugaAnimationController.ComponentRole.CARD,
+                enableParticles = false,
+                enableImpactRing = false,
+                preset = SakugaMotionPreset.PREMIUM,
+            )
             .clickable(interactionSource = source, indication = LocalIndication.current, role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -792,27 +847,32 @@ private fun IncognitoNote(isolated: Boolean, modifier: Modifier = Modifier) {
     }
 }
 
-/** Slow drifting silhouettes behind the content. Cheap: two graphicsLayer transforms, no recomposition. */
+/** Slow drifting silhouettes behind the content. Zero infinite ticks when reduced motion is enabled. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun AmbientShapes() {
     val reduced = LocalReducedMotion.current
-    val transition = rememberInfiniteTransition(label = "ambient")
-    val spin by transition.animateFloat(
-        0f, 360f, infiniteRepeatable(tween(90_000, easing = LinearEasing), RepeatMode.Restart), label = "spin",
-    )
-    val drift by transition.animateFloat(
-        -1f, 1f, infiniteRepeatable(tween(14_000), RepeatMode.Reverse), label = "drift",
-    )
+    val spinState = if (!reduced) {
+        rememberInfiniteTransition(label = "ambient").animateFloat(
+            0f, 360f, infiniteRepeatable(tween(90_000, easing = LinearEasing), RepeatMode.Restart), label = "spin",
+        )
+    } else null
+    val driftState = if (!reduced) {
+        rememberInfiniteTransition(label = "ambientDrift").animateFloat(
+            -1f, 1f, infiniteRepeatable(tween(14_000), RepeatMode.Reverse), label = "drift",
+        )
+    } else null
     val first = MaterialTheme.colorScheme.primaryContainer
     val second = MaterialTheme.colorScheme.tertiaryContainer
     Box(Modifier.fillMaxSize()) {
         Box(
             Modifier.align(Alignment.TopEnd).size(280.dp)
                 .graphicsLayer {
-                    translationX = 90.dp.toPx() + if (reduced) 0f else drift * 16.dp.toPx()
+                    val drift = driftState?.value ?: 0f
+                    val spin = spinState?.value ?: 0f
+                    translationX = 90.dp.toPx() + drift * 16.dp.toPx()
                     translationY = -70.dp.toPx()
-                    rotationZ = if (reduced) 0f else spin
+                    rotationZ = spin
                     alpha = 0.55f
                 }
                 .background(first, MaterialShapes.Cookie9Sided.toShape()),
@@ -820,9 +880,11 @@ private fun AmbientShapes() {
         Box(
             Modifier.align(Alignment.BottomStart).size(220.dp)
                 .graphicsLayer {
+                    val drift = driftState?.value ?: 0f
+                    val spin = spinState?.value ?: 0f
                     translationX = -80.dp.toPx()
-                    translationY = 60.dp.toPx() + if (reduced) 0f else drift * 12.dp.toPx()
-                    rotationZ = if (reduced) 0f else -spin * 0.8f
+                    translationY = 60.dp.toPx() + drift * 12.dp.toPx()
+                    rotationZ = -spin * 0.8f
                     alpha = 0.4f
                 }
                 .background(second, MaterialShapes.Clover4Leaf.toShape()),

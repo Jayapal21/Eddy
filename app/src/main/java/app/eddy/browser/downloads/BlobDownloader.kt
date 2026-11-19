@@ -46,7 +46,7 @@ class BlobDownloader(
     private val io = Dispatchers.IO.limitedParallelism(1)
 
     fun start(tab: BrowserTab, blobUrl: String, disposition: String, mime: String) {
-        val view = tab.webView ?: return
+        val view = tab.webView?.takeUnless { it.isDestroyed } ?: return
         val origin = Regex("^(https?://[^/?#]+)", RegexOption.IGNORE_CASE).find(tab.url)?.value?.lowercase() ?: return
         val type = mime.ifBlank { "application/octet-stream" }
         val name = DownloadNames.forResponse(disposition, type)
@@ -56,7 +56,10 @@ class BlobDownloader(
         val file = runCatching { File.createTempFile("blob-", ".tmp", dir) }.getOrElse { return onResult(str(R.string.could_not_download, name), null) }
         val job = Job(tab.id, origin, name, type, file, tab.incognito)
         jobs[id] = job
-        view.evaluateJavascript(script(id, blobUrl), null)
+        if (!view.safeEvaluateJavascript(script(id, blobUrl), null)) {
+            fail(id, job)
+            return
+        }
         // A page that navigates away or stops sending never posts "end"; give up after a quiet minute.
         scope.launch {
             while (jobs[id] === job) {

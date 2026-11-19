@@ -137,6 +137,7 @@ class TabManager(
         val view = f.create(tab)
         tab.painted = false
         tab.leftHome = false
+        view.postSafeDelayed(1500L) { if (!tab.painted) tab.painted = true }
         val restored = state != null && view.restoreState(state) != null
         tab.canGoBack = view.canGoBack()
         tab.canGoForward = view.canGoForward()
@@ -154,7 +155,13 @@ class TabManager(
         tab.url = url
         tab.title = ""
         tab.isLoading = true
+        tab.progress = 5
+        val hadView = tab.webView != null
         val view = tab.webView ?: createView(tab, null, loadUrl = false).also { tab.webView = it }
+        if (fromHome || !hadView) {
+            tab.painted = false
+            view.postSafeDelayed(1200L) { if (tab.url == url && !tab.painted) tab.painted = true }
+        }
         tab.leftHome = fromHome
         getFactory().load(tab, view, url)
         requestPersist()
@@ -184,20 +191,7 @@ class TabManager(
     fun showHome(tab: BrowserTab) {
         destroyView(tab)
         tab.error?.sslHandler?.cancel()
-        tab.error = null
-        tab.url = ""
-        tab.title = ""
-        tab.favicon = null
-        tab.isLoading = false
-        tab.progress = 0
-        tab.canGoBack = false
-        tab.canGoForward = false
-        tab.blockedRaw = 0
-        tab.blockedCount = 0
-        tab.hasPersistedState = false
-        tab.savedState = null
-        tab.readerAvailable = false
-        tab.readerActive = false
+        resetTabStateForHome(tab)
         requestPersist()
     }
 
@@ -208,7 +202,7 @@ class TabManager(
         val view = getFactory().create(tab)
         tab.painted = false
         // A popup a script fills with document.write reports no load at all; show it once nothing has started loading.
-        view.postDelayed({ if (tab.progress == 0) tab.painted = true }, 500)
+        view.postSafeDelayed(500L) { if (tab.progress == 0) tab.painted = true }
         tab.webView = view
         transport.webView = view
         resultMsg.sendToTarget()
@@ -363,6 +357,9 @@ class TabManager(
         view.onScrolled = null
         view.onPull = null
         view.onPullRelease = null
+        view.canSwipeEdge = null
+        view.onEdgeSwipe = null
+        view.onEdgeSwipeRelease = null
         if (factoryCreated) getFactory().cancelPrerender(view)
         (view.parent as? ViewGroup)?.removeView(view)
         view.stopLoading()
@@ -478,4 +475,35 @@ class TabManager(
         const val MAX_LIVE = 4
         const val MAX_CLOSED = 10
     }
+}
+
+internal fun resetTabStateForHome(tab: BrowserTab) {
+    tab.error = null
+    tab.url = ""
+    tab.title = ""
+    tab.favicon = null
+    tab.isLoading = false
+    tab.progress = 0
+    tab.canGoBack = false
+    tab.canGoForward = false
+    tab.security = Security.NONE
+    tab.blockedRaw = 0
+    tab.blockedCount = 0
+    tab.pageHost = ""
+    tab.httpsUpgradedFrom = null
+    tab.desktopOverride = null
+    tab.desktopActive = false
+    tab.devToolsActive = false
+    tab.shieldShown = false
+    tab.siteBlockingOff = false
+    tab.blockingActive = true
+    tab.trackerBlockingActive = true
+    tab.pullDistance = 0
+    tab.refreshing = false
+    tab.painted = true
+    tab.leftHome = false
+    tab.hasPersistedState = false
+    tab.savedState = null
+    tab.readerAvailable = false
+    tab.readerActive = false
 }

@@ -3,6 +3,7 @@ package app.eddy.browser.browser
 import android.graphics.Bitmap
 import android.os.Message
 import android.view.View
+import android.webkit.ConsoleMessage
 import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
@@ -13,6 +14,16 @@ import app.eddy.browser.util.UrlUtils
 
 class EddyChromeClient(private val tab: BrowserTab, private val host: BrowserHost) : WebChromeClient() {
     private var geolocationOrigin: String? = null
+
+    override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
+        collectWebViewConsoleError(
+            tab = tab,
+            consoleMessage = consoleMessage,
+            darkModeEnabled = host.settings.darkenPages,
+            failedDarkModePageKey = tab.webView?.failedDarkModePageKey,
+        )
+        return false
+    }
 
     override fun onProgressChanged(view: WebView, newProgress: Int) {
         if (tab.error != null) return

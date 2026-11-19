@@ -666,13 +666,10 @@ Cada site, mecanismo de pesquisa e host de lista que você contata pode ver seu 
     <string name="web_debugging_hint">Permite que o chrome://inspect se conecte às páginas por USB</string>
     <string name="skipped_suffix">, %1$s ignorados</string>
     <string name="voice_search">Pesquisa por voz</string>
-    <string name="discord_title">O Eddy tem um Discord</string>
-    <string name="discord_message">Entre no novo servidor do Eddy no Discord para conversar com outros usuários, relatar bugs, sugerir recursos e saber das novas versões primeiro.</string>
     <!-- Folder under fastlane/metadata/android that holds this language's changelogs. -->
     <string name="blocking_off_for_site">O bloqueio de anúncios e rastreadores está desativado para este site</string>
     <string name="changelog_locale">pt-BR</string>
     <string name="changelog_title">Novidades</string>
-    <string name="discord_join">Entrar</string>
     <string name="the_certificate_is_untrusted">Este certificado não foi emitido por uma autoridade confiável.</string>
     <string name="feature_location">localização</string>
     <string name="feature_camera">câmera</string>

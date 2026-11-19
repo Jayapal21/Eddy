@@ -665,13 +665,10 @@ Jede Website, Suchmaschine und jeder Listenanbieter, den du kontaktierst, kann d
     <string name="web_debugging_hint">Erlaubt chrome://inspect, sich per USB mit Seiten zu verbinden</string>
     <string name="skipped_suffix">, %1$s übersprungen</string>
     <string name="voice_search">Sprachsuche</string>
-    <string name="discord_title">Eddy hat einen Discord</string>
-    <string name="discord_message">Tritt dem neuen Eddy-Discord-Server bei, um mit anderen Nutzern zu chatten, Fehler zu melden, Funktionen vorzuschlagen und als Erster von neuen Versionen zu erfahren.</string>
     <!-- Folder under fastlane/metadata/android that holds this language's changelogs. -->
     <string name="blocking_off_for_site">Werbe- und Trackerblockierung ist für diese Website deaktiviert</string>
     <string name="changelog_locale">de-DE</string>
     <string name="changelog_title">Neuigkeiten</string>
-    <string name="discord_join">Beitreten</string>
     <string name="the_certificate_is_untrusted">Dieses Zertifikat wurde nicht von einer vertrauenswürdigen Stelle ausgestellt.</string>
     <string name="feature_location">Standort</string>
     <string name="feature_camera">Kamera</string>

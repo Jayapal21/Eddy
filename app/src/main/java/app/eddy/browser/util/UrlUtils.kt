@@ -42,6 +42,15 @@ object UrlUtils {
     /** Host without a leading "www.", for display. */
     fun displayHost(url: String): String = host(url).removePrefix("www.")
 
+    /** Concise domain label for the compact Dynamic Island pill. */
+    fun compactDomain(url: String, fallback: String = ""): String {
+        val clean = displayHost(url)
+            .removePrefix("m.")
+            .removePrefix("mobile.")
+            .ifEmpty { fallback.removePrefix("www.") }
+        return clean.ifEmpty { fallback }
+    }
+
     /** Permission grants belong to an origin, including its scheme and non-default port. */
     fun origin(url: String): String? = runCatching {
         val uri = java.net.URI(url)
